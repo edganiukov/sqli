@@ -1,16 +1,21 @@
 mod app;
+mod cassandra;
+mod clickhouse;
+mod config;
 mod controller;
+mod db;
+mod postgres;
 
 use std::io;
 
 use app::App;
 use controller::Controller;
 
+use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 
 fn main() -> io::Result<()> {
