@@ -52,6 +52,7 @@ pub struct DatabaseConn {
     pub port: u16,
     pub user: String,
     pub password: String,
+    pub tls: bool,
 }
 
 impl DatabaseConn {
@@ -74,7 +75,7 @@ impl DatabaseConn {
             }
             DatabaseType::ClickHouse => {
                 let client =
-                    ClickHouseClient::connect(&self.host, self.port, &self.user, &self.password, database)
+                    ClickHouseClient::connect(&self.host, self.port, &self.user, &self.password, database, self.tls)
                         .await?;
                 Ok(DatabaseClient::ClickHouse(client))
             }

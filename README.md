@@ -1,12 +1,14 @@
 # sqli
 
+NOTE: the project is vibe-coded.
+
 A terminal-based SQL client with vim-style keybindings. Supports multiple database backends.
 
 ## Supported Databases
 
-- **PostgreSQL** - native protocol (port 5432).
-- **Cassandra/ScyllaDB** - CQL protocol (port 9042).
-- **ClickHouse** - HTTP API (port 8123).
+- **PostgreSQL** - native protocol.
+- **Cassandra/ScyllaDB** - CQL protocol.
+- **ClickHouse** - HTTP API.
 
 ## Features
 
@@ -80,6 +82,13 @@ type = "clickhouse"
 host = "clickhouse.local"
 port = 8123
 user = "default"
+
+[analytics-secure]
+type = "clickhouse"
+host = "clickhouse.example.com"
+port = 8443
+user = "default"
+tls = true
 
 [scylla-cluster]
 type = "cassandra"

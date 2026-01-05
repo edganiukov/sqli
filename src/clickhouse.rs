@@ -29,9 +29,11 @@ impl ClickHouseClient {
         user: &str,
         password: &str,
         database: &str,
+        tls: bool,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let client = Client::new();
-        let base_url = format!("http://{}:{}", host, port);
+        let scheme = if tls { "https" } else { "http" };
+        let base_url = format!("{}://{}:{}", scheme, host, port);
 
         let ch_client = Self {
             client,

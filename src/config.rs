@@ -19,6 +19,8 @@ pub struct ConnectionConfig {
     pub password: Option<String>,
     #[serde(default)]
     pub password_cmd: Option<String>,
+    #[serde(default)]
+    pub tls: bool,
 }
 
 fn default_port() -> u16 {
@@ -51,6 +53,7 @@ impl ConnectionConfig {
             port: self.port,
             user: self.user.clone(),
             password: self.resolve_password(),
+            tls: self.tls,
         })
     }
 }
@@ -130,5 +133,6 @@ fn default_connections() -> Vec<DatabaseConn> {
         port: 5432,
         user: "postgres".to_string(),
         password: String::new(),
+        tls: false,
     }]
 }
