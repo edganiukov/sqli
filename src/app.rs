@@ -10,6 +10,17 @@ use ratatui::widgets::{
 
 const PADDING: u16 = 1;
 
+// Color scheme
+const ACCENT: Color = Color::Rgb(180, 140, 100); // Warm tan
+const BLUE: Color = Color::Rgb(70, 115, 150); // Dim blue
+const SUCCESS: Color = Color::Rgb(130, 160, 110); // Muted green
+const WARNING: Color = Color::Rgb(190, 160, 100); // Muted gold
+const SURFACE: Color = Color::Rgb(40, 42, 46); // Dark background
+const SURFACE_LIGHT: Color = Color::Rgb(52, 54, 58); // Slightly lighter
+const TEXT: Color = Color::Rgb(190, 190, 185); // Light text
+const TEXT_DIM: Color = Color::Rgb(100, 100, 96); // Dimmed text
+const HIGHLIGHT: Color = Color::Rgb(60, 58, 52); // Subtle warm selection
+
 pub struct App {
     controller: Controller,
 }
@@ -32,6 +43,9 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
+
+        // Fill background
+        frame.render_widget(Block::default().style(Style::default().bg(SURFACE)), area);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -64,25 +78,34 @@ impl App {
                 .map(|db| format!(" {} ", db))
                 .unwrap_or_else(|| " No database ".to_string());
 
+            let conn_info =
+                tab.connected_db.as_ref().map(|c| format!(" {} ", c)).unwrap_or_default();
+
             Paragraph::new(Line::from(vec![
-                Span::styled(db_info, Style::default().fg(Color::Black).bg(Color::Yellow)),
+                Span::styled(conn_info, Style::default().fg(TEXT).bg(SURFACE_LIGHT)),
+                Span::styled(db_info, Style::default().fg(SURFACE).bg(BLUE)),
                 Span::raw(" "),
-                Span::styled(status_msg, Style::default().fg(Color::White)),
+                Span::styled(status_msg, Style::default().fg(TEXT)),
             ]))
-            .style(Style::default().bg(Color::Rgb(60, 60, 60)))
+            .style(Style::default().bg(SURFACE_LIGHT))
         } else {
-            Paragraph::new(status_msg)
-                .style(Style::default().fg(Color::White).bg(Color::Rgb(60, 60, 60)))
+            Paragraph::new(Line::from(vec![Span::styled(
+                status_msg,
+                Style::default().fg(TEXT),
+            )]))
+            .style(Style::default().bg(SURFACE_LIGHT))
         };
         frame.render_widget(status_line, chunks[2]);
 
         // Command line
-        if self.controller.mode == Mode::Command {
+        let command_line = if self.controller.mode == Mode::Command {
             let command_text = format!(":{}", self.controller.command_buffer);
-            let command_line = Paragraph::new(command_text.clone());
-            frame.render_widget(command_line, chunks[3]);
             frame.set_cursor_position((command_text.len() as u16, chunks[3].y));
-        }
+            Paragraph::new(command_text).style(Style::default().fg(TEXT).bg(SURFACE))
+        } else {
+            Paragraph::new(":help for commands").style(Style::default().fg(TEXT_DIM).bg(SURFACE))
+        };
+        frame.render_widget(command_line, chunks[3]);
     }
 
     fn draw_tabs(&self, frame: &mut Frame, area: Rect) {
@@ -90,18 +113,16 @@ impl App {
         for (i, tab) in self.controller.tabs.iter().enumerate() {
             let tab_name = format!(" {} ", tab.name);
             let style = if i == self.controller.current_tab {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default().fg(SURFACE).bg(BLUE).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(TEXT_DIM).bg(SURFACE_LIGHT)
             };
 
             spans.push(Span::styled(tab_name, style));
-            if i < self.controller.tabs.len() - 1 {
-                spans.push(Span::raw(" "));
-            }
+            spans.push(Span::styled(" ", Style::default().bg(SURFACE)));
         }
 
-        let tabs = Paragraph::new(Line::from(spans));
+        let tabs = Paragraph::new(Line::from(spans)).style(Style::default().bg(SURFACE));
         frame.render_widget(tabs, area);
     }
 
@@ -111,14 +132,21 @@ impl App {
             .connections
             .iter()
             .map(|conn| {
-                let line = format!(
-                    "{} ({}) - {}:{}",
-                    conn.name,
-                    conn.db_type.as_str(),
-                    conn.host,
-                    conn.port
-                );
-                ListItem::new(line)
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("[{}]", conn.db_type.as_str()),
+                        Style::default().fg(TEXT_DIM),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        &conn.name,
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {}:{}", conn.host, conn.port),
+                        Style::default().fg(TEXT_DIM),
+                    ),
+                ]))
             })
             .collect();
 
@@ -131,7 +159,7 @@ impl App {
 
         // Calculate centered area.
         let list_width = 60.min(padded_area.width);
-        let list_height = tab.connections.len() as u16;
+        let list_height = (tab.connections.len() as u16 + 4).min(padded_area.height);
 
         let list_x = padded_area.x + (padded_area.width.saturating_sub(list_width)) / 2;
         let list_y = padded_area.y + (padded_area.height.saturating_sub(list_height)) / 2;
@@ -143,9 +171,18 @@ impl App {
             height: list_height,
         };
 
+        let block = Block::default()
+            .title(" Connections ")
+            .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(TEXT_DIM))
+            .style(Style::default().bg(SURFACE));
+
         let list = List::new(items)
-            .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
-            .highlight_symbol(">> ");
+            .block(block)
+            .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
+            .highlight_symbol("> ");
 
         let mut list_state = ListState::default();
         list_state.select(Some(tab.selected_index));
@@ -176,7 +213,6 @@ impl App {
         self.draw_query_output(frame, right_chunks[1]);
     }
 
-
     fn draw_sidebar(&self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Sidebar;
@@ -186,51 +222,51 @@ impl App {
             .items
             .iter()
             .map(|item| {
-                let (prefix, name) = match item {
+                let (prefix, name, style) = match item {
                     SidebarItem::Database(db) => {
                         let arrow = if tab.sidebar.expanded.contains(db) {
-                            "▼"
+                            "▼ "
                         } else {
-                            "▶"
+                            "▶ "
                         };
-                        (format!("{} ", arrow), db.clone())
+                        (
+                            arrow.to_string(),
+                            db.clone(),
+                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                        )
                     }
-                    SidebarItem::Table { table, .. } => ("    ".to_string(), table.clone()),
+                    SidebarItem::Table { table, .. } => {
+                        ("   ".to_string(), table.clone(), Style::default().fg(TEXT))
+                    }
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(prefix, Style::default().fg(Color::DarkGray)),
-                    Span::raw(name),
+                    Span::styled(prefix, Style::default().fg(TEXT_DIM)),
+                    Span::styled(name, style),
                 ]))
             })
             .collect();
 
-        let border_color = if is_focused {
-            Color::Cyan
-        } else {
-            Color::DarkGray
-        };
+        let border_color = if is_focused { BLUE } else { TEXT_DIM };
+        let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
 
-        let mut block = Block::default()
+        let block = Block::default()
+            .title(" Explorer ")
+            .title_style(
+                Style::default()
+                    .fg(if is_focused { BLUE } else { TEXT_DIM })
+                    .add_modifier(Modifier::BOLD),
+            )
             .borders(Borders::RIGHT)
-            .border_type(BorderType::Thick)
-            .border_style(Style::default().fg(border_color));
-
-        if !is_focused {
-            block = block.style(Style::default().bg(Color::Rgb(45, 45, 50)));
-        }
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bg_color));
 
         let list = List::new(items)
             .block(block)
             .highlight_style(
-                Style::default()
-                    .bg(if is_focused {
-                        Color::Blue
-                    } else {
-                        Color::DarkGray
-                    })
-                    .fg(Color::White),
+                Style::default().bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT }).fg(TEXT),
             )
-            .highlight_symbol("> ");
+            .highlight_symbol(if is_focused { "> " } else { " " });
 
         let mut list_state = ListState::default();
         list_state.select(Some(tab.sidebar.selected));
@@ -242,42 +278,58 @@ impl App {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Query;
 
-        let border_color = match tab.focus {
-            Focus::Query => Color::Cyan,
-            Focus::Output => Color::Green,
-            _ => Color::DarkGray,
-        };
+        let border_color = if is_focused { BLUE } else { TEXT_DIM };
+        let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
 
-        let mut block = Block::default()
+        let block = Block::default()
+            .title(" Query: ")
+            .title_style(
+                Style::default()
+                    .fg(if is_focused { BLUE } else { TEXT_DIM })
+                    .add_modifier(Modifier::BOLD),
+            )
             .borders(Borders::BOTTOM)
-            .border_type(BorderType::Thick)
-            .border_style(Style::default().fg(border_color));
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bg_color));
 
-        if !is_focused {
-            block = block.style(Style::default().bg(Color::Rgb(45, 45, 50)));
-            self.controller.query_textarea.set_style(Style::default().bg(Color::Rgb(45, 45, 50)));
+        self.controller.query_textarea.set_style(Style::default().bg(bg_color).fg(TEXT));
+        self.controller.query_textarea.set_cursor_style(Style::default().bg(if is_focused {
+            BLUE
         } else {
-            self.controller.query_textarea.set_style(Style::default());
-        }
-
+            TEXT_DIM
+        }));
         self.controller.query_textarea.set_block(block);
-        self.controller.query_textarea.set_line_number_style(Style::default().fg(Color::DarkGray));
+        self.controller.query_textarea.set_line_number_style(Style::default().fg(TEXT_DIM));
         frame.render_widget(&self.controller.query_textarea, area);
     }
 
     fn draw_query_output(&self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Output;
-        let unfocused_bg = Color::Rgb(45, 45, 50);
+        let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
+
+        let block = Block::default()
+            .title(" Results ")
+            .title_style(
+                Style::default()
+                    .fg(if is_focused { SUCCESS } else { TEXT_DIM })
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::TOP)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(if is_focused { SUCCESS } else { TEXT_DIM }))
+            .style(Style::default().bg(bg_color));
+
+        let inner_area = block.inner(area);
+        frame.render_widget(block, area);
 
         match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
                 if columns.is_empty() {
-                    let mut msg = Paragraph::new("No results");
-                    if !is_focused {
-                        msg = msg.style(Style::default().bg(unfocused_bg));
-                    }
-                    frame.render_widget(msg, area);
+                    let msg = Paragraph::new("No results")
+                        .style(Style::default().fg(TEXT_DIM).bg(bg_color));
+                    frame.render_widget(msg, inner_area);
                 } else {
                     // Calculate column widths based on content
                     let mut col_widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
@@ -294,7 +346,7 @@ impl App {
                     }
                     // Scale down if total exceeds available width
                     let total_width: usize = col_widths.iter().sum();
-                    let available_width = area.width as usize;
+                    let available_width = inner_area.width as usize;
                     if total_width > available_width {
                         let scale = available_width as f64 / total_width as f64;
                         for w in col_widths.iter_mut() {
@@ -304,26 +356,27 @@ impl App {
 
                     let header_cells = columns.iter().map(|h| {
                         Cell::from(h.as_str())
-                            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                            .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
-                    let header = Row::new(header_cells).height(1);
+                    let header =
+                        Row::new(header_cells).height(1).style(Style::default().bg(SURFACE_LIGHT));
 
                     // Calculate visible rows based on scroll position
-                    let visible_height = area.height.saturating_sub(1) as usize; // -1 for header
+                    let visible_height = inner_area.height.saturating_sub(1) as usize; // -1 for header
                     let scroll = tab.result_scroll;
                     let cursor = tab.result_cursor;
 
                     let visible_rows =
                         rows.iter().enumerate().skip(scroll).take(visible_height).map(
                             |(idx, row)| {
-                                let cells = row.iter().map(|c| Cell::from(c.as_str()));
+                                let cells = row.iter().map(|c| {
+                                    Cell::from(c.as_str()).style(Style::default().fg(TEXT))
+                                });
                                 let row = Row::new(cells).height(1);
                                 if idx == cursor && is_focused {
-                                    row.style(Style::default().bg(Color::Rgb(60, 60, 80)))
-                                } else if !is_focused {
-                                    row.style(Style::default().bg(unfocused_bg))
+                                    row.style(Style::default().bg(HIGHLIGHT))
                                 } else {
-                                    row
+                                    row.style(Style::default().bg(bg_color))
                                 }
                             },
                         );
@@ -331,27 +384,31 @@ impl App {
                     let widths: Vec<Constraint> =
                         col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
 
-                    let mut table = Table::new(visible_rows, widths).header(header);
-                    if !is_focused {
-                        table = table.style(Style::default().bg(unfocused_bg));
-                    }
+                    let table = Table::new(visible_rows, widths)
+                        .header(header)
+                        .style(Style::default().bg(bg_color));
 
-                    frame.render_widget(table, area);
+                    frame.render_widget(table, inner_area);
                 }
             }
             Some(QueryResult::Execute { rows_affected }) => {
-                let mut msg = Paragraph::new(format!("{} row(s) affected", rows_affected));
-                if !is_focused {
-                    msg = msg.style(Style::default().bg(unfocused_bg));
-                }
-                frame.render_widget(msg, area);
+                let msg = Paragraph::new(format!("{} row(s) affected", rows_affected))
+                    .style(Style::default().fg(SUCCESS).bg(bg_color));
+                frame.render_widget(msg, inner_area);
             }
             None => {
-                let mut msg = Paragraph::new("Press F5 to execute query");
-                if !is_focused {
-                    msg = msg.style(Style::default().bg(unfocused_bg));
-                }
-                frame.render_widget(msg, area);
+                let msg = Paragraph::new(Line::from(vec![
+                    Span::styled("Press ", Style::default().fg(TEXT_DIM)),
+                    Span::styled("F5", Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
+                    Span::styled(" or ", Style::default().fg(TEXT_DIM)),
+                    Span::styled(
+                        "Ctrl+J",
+                        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" to execute query", Style::default().fg(TEXT_DIM)),
+                ]))
+                .style(Style::default().bg(bg_color));
+                frame.render_widget(msg, inner_area);
             }
         }
     }
