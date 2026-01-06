@@ -58,7 +58,7 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 ## Configuration
 
 Configuration is loaded from:
-1. `./config.toml` (current directory)
+1. `./sqli.toml` (current directory)
 2. `~/.config/sqli/config.toml`
 
 ### Example config.toml

@@ -1,18 +1,23 @@
-[dev_postgres]
+[postgres]
 type = "postgres"
 host = "localhost"
 port = 5432
 user = "postgres"
 password = "password"
 
-[dev_cassandra]
-type = "cassandra"
-host = "192.168.0.30"
-port = 9042
-user = "cassandra"
+[mysql]
+type = "mysql"
+host = "localhost"
+port = 3306
+user = "root"
 password = "password"
 
-[dev_clickhouse]
+[scylla]
+type = "cassandra"
+host = "localhost"
+port = 9042
+
+[clickhouse]
 type = "clickhouse"
 host = "localhost"
 port = 8123

@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17.2
+    container_name: sqli-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+
+  mysql:
+    image: mysql:9.1
+    container_name: sqli-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306:3306"
+
+  scylla:
+    image: scylladb/scylla:6.2
+    container_name: sqli-scylla
+    command: --smp 1 --memory 512M
+    ports:
+      - "9042:9042"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.11
+    container_name: sqli-clickhouse
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: password
+    ports:
+      - "8123:8123"
+      - "9000:9000"

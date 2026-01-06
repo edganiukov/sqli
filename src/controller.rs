@@ -1,6 +1,7 @@
 use crate::cassandra::CassandraClient;
 use crate::clickhouse::ClickHouseClient;
 use crate::db::{DatabaseClient, QueryResult};
+use crate::mysql::MySqlClient;
 use crate::postgres::PostgresClient;
 use chrono::Local;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -30,6 +31,7 @@ pub enum Focus {
 #[derive(Debug, Clone)]
 pub enum DatabaseType {
     Postgres,
+    MySql,
     Cassandra,
     ClickHouse,
 }
@@ -38,6 +40,7 @@ impl DatabaseType {
     pub fn as_str(&self) -> &str {
         match self {
             DatabaseType::Postgres => "PostgreSQL",
+            DatabaseType::MySql => "MySQL",
             DatabaseType::Cassandra => "Cassandra",
             DatabaseType::ClickHouse => "ClickHouse",
         }
@@ -67,6 +70,12 @@ impl DatabaseConn {
                         .await?;
                 Ok(DatabaseClient::Postgres(client))
             }
+            DatabaseType::MySql => {
+                let client =
+                    MySqlClient::connect(&self.host, self.port, &self.user, &self.password, database)
+                        .await?;
+                Ok(DatabaseClient::MySql(client))
+            }
             DatabaseType::Cassandra => {
                 let client =
                     CassandraClient::connect(&self.host, self.port, &self.user, &self.password, database)
@@ -85,6 +94,7 @@ impl DatabaseConn {
     pub fn default_database(&self) -> String {
         match self.db_type {
             DatabaseType::Postgres => PostgresClient::default_database().to_string(),
+            DatabaseType::MySql => MySqlClient::default_database().to_string(),
             DatabaseType::Cassandra => CassandraClient::default_database().to_string(),
             DatabaseType::ClickHouse => ClickHouseClient::default_database().to_string(),
         }
@@ -207,8 +217,8 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new() -> Self {
-        let connections = crate::config::load_config();
+    pub fn new(config_path: Option<std::path::PathBuf>) -> Self {
+        let connections = crate::config::load_config(config_path);
         let runtime = Runtime::new().expect("Failed to create tokio runtime");
 
         Self {

@@ -41,6 +41,7 @@ impl ConnectionConfig {
     pub fn to_database_conn(&self, name: &str) -> Option<DatabaseConn> {
         let db_type = match self.db_type.to_lowercase().as_str() {
             "postgres" | "postgresql" => DatabaseType::Postgres,
+            "mysql" | "mariadb" => DatabaseType::MySql,
             "cassandra" | "scylla" => DatabaseType::Cassandra,
             "clickhouse" | "ch" => DatabaseType::ClickHouse,
             _ => return None,
@@ -75,8 +76,8 @@ fn run_password_command(cmd: &str) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-pub fn load_config() -> Vec<DatabaseConn> {
-    let config_path = get_config_path();
+pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
+    let config_path = custom_path.or_else(get_config_path);
 
     match config_path {
         Some(path) => match fs::read_to_string(&path) {
@@ -109,7 +110,7 @@ pub fn load_config() -> Vec<DatabaseConn> {
 
 fn get_config_path() -> Option<PathBuf> {
     // Priority 1: current directory
-    let local_config = PathBuf::from("config.toml");
+    let local_config = PathBuf::from("sqli.toml");
     if local_config.exists() {
         return Some(local_config);
     }

@@ -4,11 +4,14 @@ mod clickhouse;
 mod config;
 mod controller;
 mod db;
+mod mysql;
 mod postgres;
 
 use std::io;
+use std::path::PathBuf;
 
 use app::App;
+use clap::Parser;
 use controller::Controller;
 
 use crossterm::ExecutableCommand;
@@ -18,9 +21,19 @@ use crossterm::terminal::{
 };
 use ratatui::prelude::*;
 
+#[derive(Parser)]
+#[command(name = "sqli")]
+#[command(about = "Interactive SQL client for multiple databases")]
+struct Args {
+    /// Path to config file
+    #[arg(short, long)]
+    config: Option<PathBuf>,
+}
+
 fn main() -> io::Result<()> {
+    let args = Args::parse();
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal);
+    let result = run(&mut terminal, args.config);
     restore_terminal()?;
     result
 }
@@ -37,8 +50,8 @@ fn restore_terminal() -> io::Result<()> {
     Ok(())
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-    let controller = Controller::new();
+fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config_path: Option<PathBuf>) -> io::Result<()> {
+    let controller = Controller::new(config_path);
     let mut app = App::new(controller);
 
     loop {
