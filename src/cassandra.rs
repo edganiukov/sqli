@@ -1,5 +1,7 @@
 use crate::db::QueryResult;
+use chrono::{DateTime, NaiveDate, Utc};
 use scylla::frame::response::result::CqlValue;
+use scylla::frame::value::{CqlDate, CqlDecimal, CqlTime, CqlTimestamp};
 use scylla::{Session, SessionBuilder};
 use std::error::Error;
 use std::sync::Arc;
@@ -146,7 +148,7 @@ impl CassandraClient {
                 CqlValue::Double(d) => d.to_string(),
                 CqlValue::Boolean(b) => b.to_string(),
                 CqlValue::Uuid(u) => u.to_string(),
-                CqlValue::Timestamp(t) => format!("{:?}", t),
+                CqlValue::Timestamp(t) => Self::format_timestamp(t),
                 CqlValue::Blob(b) => format!("<blob {} bytes>", b.len()),
                 CqlValue::List(l) => format!("[{} items]", l.len()),
                 CqlValue::Map(m) => format!("{{map {} entries}}", m.len()),
@@ -154,12 +156,72 @@ impl CassandraClient {
                 CqlValue::SmallInt(i) => i.to_string(),
                 CqlValue::TinyInt(i) => i.to_string(),
                 CqlValue::Inet(addr) => addr.to_string(),
-                CqlValue::Date(d) => format!("{:?}", d),
-                CqlValue::Time(t) => format!("{:?}", t),
+                CqlValue::Date(d) => Self::format_date(d),
+                CqlValue::Time(t) => Self::format_time(t),
                 CqlValue::Varint(v) => format!("{:?}", v),
-                CqlValue::Decimal(d) => format!("{:?}", d),
+                CqlValue::Decimal(d) => Self::format_decimal(d),
                 _ => format!("{:?}", v),
             },
+        }
+    }
+
+    fn format_timestamp(t: &CqlTimestamp) -> String {
+        // CqlTimestamp contains milliseconds since Unix epoch
+        let millis = t.0;
+        let secs = millis / 1000;
+        let nsecs = ((millis % 1000) * 1_000_000) as u32;
+        match DateTime::<Utc>::from_timestamp(secs, nsecs) {
+            Some(dt) => dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            None => format!("{}", millis),
+        }
+    }
+
+    fn format_date(d: &CqlDate) -> String {
+        // CqlDate is days since Unix epoch (1970-01-01)
+        let days = d.0 as i64 - (1 << 31); // CqlDate uses unsigned with offset
+        match NaiveDate::from_num_days_from_ce_opt(days as i32 + 719163) {
+            Some(date) => date.format("%Y-%m-%d").to_string(),
+            None => format!("{}", d.0),
+        }
+    }
+
+    fn format_time(t: &CqlTime) -> String {
+        // CqlTime is nanoseconds since midnight
+        let nanos = t.0;
+        let secs = nanos / 1_000_000_000;
+        let hours = secs / 3600;
+        let mins = (secs % 3600) / 60;
+        let secs = secs % 60;
+        let millis = (nanos % 1_000_000_000) / 1_000_000;
+        format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
+    }
+
+    fn format_decimal(d: &CqlDecimal) -> String {
+        use num_bigint::BigInt;
+        let (int_val, scale) = d.as_signed_be_bytes_slice_and_exponent();
+        let bigint = BigInt::from_signed_bytes_be(int_val);
+        let scale = scale as usize;
+
+        let s = bigint.to_string();
+        let negative = s.starts_with('-');
+        let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        if scale == 0 {
+            if negative { format!("-{}", digits) } else { digits }
+        } else if scale >= digits.len() {
+            let zeros = "0".repeat(scale - digits.len());
+            if negative {
+                format!("-0.{}{}", zeros, digits)
+            } else {
+                format!("0.{}{}", zeros, digits)
+            }
+        } else {
+            let (int_part, frac_part) = digits.split_at(digits.len() - scale);
+            if negative {
+                format!("-{}.{}", int_part, frac_part)
+            } else {
+                format!("{}.{}", int_part, frac_part)
+            }
         }
     }
 

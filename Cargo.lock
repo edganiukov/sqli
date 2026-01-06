@@ -2594,6 +2594,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "mysql_async",
+ "num-bigint",
  "ratatui",
  "reqwest",
  "rust_decimal",
