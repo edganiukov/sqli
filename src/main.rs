@@ -50,7 +50,10 @@ fn restore_terminal() -> io::Result<()> {
     Ok(())
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config_path: Option<PathBuf>) -> io::Result<()> {
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    config_path: Option<PathBuf>,
+) -> io::Result<()> {
     let controller = Controller::new(config_path);
     let mut app = App::new(controller);
 

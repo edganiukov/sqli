@@ -30,7 +30,9 @@ impl CassandraClient {
 
         // Use keyspace if provided
         if !keyspace.is_empty() {
-            session.query_unpaged(format!("USE {}", keyspace), &[]).await?;
+            session
+                .query_unpaged(format!("USE {}", keyspace), &[])
+                .await?;
         }
 
         Ok(Self {
@@ -62,7 +64,9 @@ impl CassandraClient {
         let mut keyspaces = Vec::new();
         if let Some(rows) = rows.rows {
             for row in rows {
-                if let Some(CqlValue::Text(s) | CqlValue::Ascii(s)) = row.columns.get(0).and_then(|v| v.as_ref()) {
+                if let Some(CqlValue::Text(s) | CqlValue::Ascii(s)) =
+                    row.columns.get(0).and_then(|v| v.as_ref())
+                {
                     if include_system || !SYSTEM_KEYSPACES.contains(&s.as_str()) {
                         keyspaces.push(s.clone());
                     }
@@ -90,9 +94,12 @@ impl CassandraClient {
         if let Some(rows) = rows.rows {
             for row in rows {
                 // Check if keyspace matches
-                if let Some(CqlValue::Text(ks) | CqlValue::Ascii(ks)) = row.columns.get(0).and_then(|v| v.as_ref()) {
+                if let Some(CqlValue::Text(ks) | CqlValue::Ascii(ks)) =
+                    row.columns.get(0).and_then(|v| v.as_ref())
+                {
                     if ks == keyspace {
-                        if let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) = row.columns.get(1).and_then(|v| v.as_ref())
+                        if let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) =
+                            row.columns.get(1).and_then(|v| v.as_ref())
                         {
                             tables.push(t.clone());
                         }
@@ -113,14 +120,20 @@ impl CassandraClient {
         if query_upper.starts_with("SELECT") {
             let result = self.session.query_unpaged(query, &[]).await?;
 
-            let columns: Vec<String> =
-                result.col_specs().iter().map(|spec| spec.name.clone()).collect();
+            let columns: Vec<String> = result
+                .col_specs()
+                .iter()
+                .map(|spec| spec.name.clone())
+                .collect();
 
             let mut data_rows: Vec<Vec<String>> = Vec::new();
             if let Some(rows) = result.rows {
                 for row in rows {
-                    let row_data: Vec<String> =
-                        row.columns.iter().map(|col| Self::format_column_value(col)).collect();
+                    let row_data: Vec<String> = row
+                        .columns
+                        .iter()
+                        .map(|col| Self::format_column_value(col))
+                        .collect();
                     data_rows.push(row_data);
                 }
             }
@@ -207,7 +220,11 @@ impl CassandraClient {
         let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
 
         if scale == 0 {
-            if negative { format!("-{}", digits) } else { digits }
+            if negative {
+                format!("-{}", digits)
+            } else {
+                digits
+            }
         } else if scale >= digits.len() {
             let zeros = "0".repeat(scale - digits.len());
             if negative {

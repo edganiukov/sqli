@@ -74,12 +74,19 @@ impl PostgresClient {
                 });
             }
 
-            let columns: Vec<String> =
-                rows[0].columns().iter().map(|c| c.name().to_string()).collect();
+            let columns: Vec<String> = rows[0]
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect();
 
             let data_rows: Vec<Vec<String>> = rows
                 .iter()
-                .map(|row| (0..row.len()).map(|i| Self::get_column_value(row, i)).collect())
+                .map(|row| {
+                    (0..row.len())
+                        .map(|i| Self::get_column_value(row, i))
+                        .collect()
+                })
                 .collect();
 
             Ok(QueryResult::Select {
@@ -118,45 +125,59 @@ impl PostgresClient {
 
         // Try to get value based on known types
         let result: Result<String, _> = match *col_type {
-            Type::BOOL => row
-                .try_get::<_, Option<bool>>(idx)
-                .map(|v| v.map(|b| b.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::INT2 => row
-                .try_get::<_, Option<i16>>(idx)
-                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::INT4 | Type::OID => row
-                .try_get::<_, Option<i32>>(idx)
-                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::INT8 => row
-                .try_get::<_, Option<i64>>(idx)
-                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::FLOAT4 => row
-                .try_get::<_, Option<f32>>(idx)
-                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::FLOAT8 => row
-                .try_get::<_, Option<f64>>(idx)
-                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::BOOL => row.try_get::<_, Option<bool>>(idx).map(|v| {
+                v.map(|b| b.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::INT2 => row.try_get::<_, Option<i16>>(idx).map(|v| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::INT4 | Type::OID => row.try_get::<_, Option<i32>>(idx).map(|v| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::INT8 => row.try_get::<_, Option<i64>>(idx).map(|v| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::FLOAT4 => row.try_get::<_, Option<f32>>(idx).map(|v| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::FLOAT8 => row.try_get::<_, Option<f64>>(idx).map(|v| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
             Type::NUMERIC => row
                 .try_get::<_, Option<rust_decimal::Decimal>>(idx)
-                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
+                .map(|v| {
+                    v.map(|n| n.to_string())
+                        .unwrap_or_else(|| "NULL".to_string())
+                }),
             Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN => row
                 .try_get::<_, Option<String>>(idx)
                 .map(|v| v.unwrap_or_else(|| "NULL".to_string())),
-            Type::JSON | Type::JSONB => row
-                .try_get::<_, Option<JsonValue>>(idx)
-                .map(|v| v.map(|j| j.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::TIMESTAMP => row
-                .try_get::<_, Option<NaiveDateTime>>(idx)
-                .map(|v| v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f").to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::TIMESTAMPTZ => row
-                .try_get::<_, Option<DateTime<Utc>>>(idx)
-                .map(|v| v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::DATE => row
-                .try_get::<_, Option<NaiveDate>>(idx)
-                .map(|v| v.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::TIME => row
-                .try_get::<_, Option<NaiveTime>>(idx)
-                .map(|v| v.map(|t| t.format("%H:%M:%S%.3f").to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::JSON | Type::JSONB => row.try_get::<_, Option<JsonValue>>(idx).map(|v| {
+                v.map(|j| j.to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::TIMESTAMP => row.try_get::<_, Option<NaiveDateTime>>(idx).map(|v| {
+                v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::TIMESTAMPTZ => row.try_get::<_, Option<DateTime<Utc>>>(idx).map(|v| {
+                v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::DATE => row.try_get::<_, Option<NaiveDate>>(idx).map(|v| {
+                v.map(|d| d.format("%Y-%m-%d").to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::TIME => row.try_get::<_, Option<NaiveTime>>(idx).map(|v| {
+                v.map(|t| t.format("%H:%M:%S%.3f").to_string())
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
             _ => {
                 // For unsupported types, try string first, then show type name
                 row.try_get::<_, Option<String>>(idx)

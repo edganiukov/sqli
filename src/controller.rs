@@ -65,27 +65,48 @@ impl DatabaseConn {
     ) -> Result<DatabaseClient, Box<dyn std::error::Error + Send + Sync>> {
         match self.db_type {
             DatabaseType::Postgres => {
-                let client =
-                    PostgresClient::connect(&self.host, self.port, &self.user, &self.password, database)
-                        .await?;
+                let client = PostgresClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &self.password,
+                    database,
+                )
+                .await?;
                 Ok(DatabaseClient::Postgres(client))
             }
             DatabaseType::MySql => {
-                let client =
-                    MySqlClient::connect(&self.host, self.port, &self.user, &self.password, database)
-                        .await?;
+                let client = MySqlClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &self.password,
+                    database,
+                )
+                .await?;
                 Ok(DatabaseClient::MySql(client))
             }
             DatabaseType::Cassandra => {
-                let client =
-                    CassandraClient::connect(&self.host, self.port, &self.user, &self.password, database)
-                        .await?;
+                let client = CassandraClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &self.password,
+                    database,
+                )
+                .await?;
                 Ok(DatabaseClient::Cassandra(client))
             }
             DatabaseType::ClickHouse => {
-                let client =
-                    ClickHouseClient::connect(&self.host, self.port, &self.user, &self.password, database, self.tls)
-                        .await?;
+                let client = ClickHouseClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &self.password,
+                    database,
+                    self.tls,
+                )
+                .await?;
                 Ok(DatabaseClient::ClickHouse(client))
             }
         }
@@ -324,8 +345,9 @@ impl Controller {
         match result {
             Ok(client) => {
                 let db_client: DatabaseClient = client;
-                let databases =
-                    self.runtime.block_on(async { db_client.list_databases(include_system).await });
+                let databases = self
+                    .runtime
+                    .block_on(async { db_client.list_databases(include_system).await });
 
                 let tab = self.current_tab_mut();
                 match databases {
@@ -435,8 +457,7 @@ impl Controller {
             KeyCode::Char('r') => {
                 self.refresh_databases();
                 let timestamp = Local::now().format("%H:%M:%S");
-                self.current_tab_mut().status_message =
-                    Some(format!("[{}] Refreshed", timestamp));
+                self.current_tab_mut().status_message = Some(format!("[{}] Refreshed", timestamp));
             }
             KeyCode::F(5) => {
                 self.execute_query();
@@ -461,7 +482,10 @@ impl Controller {
                 if is_expanded {
                     self.current_tab_mut().sidebar.expanded.remove(&db_name);
                 } else {
-                    self.current_tab_mut().sidebar.expanded.insert(db_name.clone());
+                    self.current_tab_mut()
+                        .sidebar
+                        .expanded
+                        .insert(db_name.clone());
                     self.load_tables_for_database(&db_name);
                 }
                 self.current_tab_mut().rebuild_sidebar_items();
@@ -789,7 +813,9 @@ impl Controller {
                 }
                 // Clear expanded state and tables cache for databases no longer shown
                 tab.sidebar.expanded.retain(|db| tab.databases.contains(db));
-                tab.sidebar.tables.retain(|db, _| tab.databases.contains(db));
+                tab.sidebar
+                    .tables
+                    .retain(|db, _| tab.databases.contains(db));
                 tab.rebuild_sidebar_items();
             }
             Err(e) => {

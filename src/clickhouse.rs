@@ -131,10 +131,7 @@ impl ClickHouseClient {
             || query_upper.starts_with("EXPLAIN")
         {
             // Add FORMAT JSON to get structured results
-            let query_with_format = format!(
-                "{} FORMAT JSON",
-                query.trim().trim_end_matches(';')
-            );
+            let query_with_format = format!("{} FORMAT JSON", query.trim().trim_end_matches(';'));
 
             let response = self.execute_raw(&query_with_format).await?;
 

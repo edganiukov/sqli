@@ -20,7 +20,11 @@ impl MySqlClient {
             .tcp_port(port)
             .user(Some(user))
             .pass(Some(password))
-            .db_name(if database.is_empty() { None } else { Some(database) });
+            .db_name(if database.is_empty() {
+                None
+            } else {
+                Some(database)
+            });
 
         let pool = Pool::new(Opts::from(opts));
 
@@ -35,7 +39,8 @@ impl MySqlClient {
         &self,
         include_system: bool,
     ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-        const SYSTEM_DATABASES: &[&str] = &["information_schema", "mysql", "performance_schema", "sys"];
+        const SYSTEM_DATABASES: &[&str] =
+            &["information_schema", "mysql", "performance_schema", "sys"];
 
         let mut conn = self.pool.get_conn().await?;
         let databases: Vec<String> = conn.query("SHOW DATABASES").await?;
@@ -146,4 +151,3 @@ impl MySqlClient {
         ""
     }
 }
-
