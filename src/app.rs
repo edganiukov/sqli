@@ -299,10 +299,11 @@ impl App {
 
         self.controller.query_textarea.set_style(Style::default().bg(bg_color).fg(TEXT));
         self.controller.query_textarea.set_cursor_style(Style::default().bg(if is_focused {
-            BLUE
+            Color::White
         } else {
             TEXT_DIM
         }));
+        self.controller.query_textarea.set_cursor_line_style(Style::default());
         self.controller.query_textarea.set_block(block);
         self.controller.query_textarea.set_line_number_style(Style::default().fg(TEXT_DIM));
         frame.render_widget(&self.controller.query_textarea, area);
