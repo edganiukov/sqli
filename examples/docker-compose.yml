@@ -5,18 +5,21 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: testdb
+      POSTGRES_DB: postgres
     ports:
       - "5432:5432"
+    volumes:
+      - ./init/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   mysql:
     image: mysql:9.1
     container_name: sqli-mysql
     environment:
       MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: testdb
     ports:
       - "3306:3306"
+    volumes:
+      - ./init/init-mysql.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   scylla:
     image: scylladb/scylla:6.2
@@ -24,6 +27,22 @@ services:
     command: --smp 1 --memory 512M
     ports:
       - "9042:9042"
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "SELECT now() FROM system.local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  scylla-init:
+    image: scylladb/scylla:6.2
+    container_name: sqli-scylla-init
+    depends_on:
+      scylla:
+        condition: service_healthy
+    volumes:
+      - ./init/init-scylla.cql:/init.cql:ro
+    entrypoint: ["cqlsh", "scylla", "-f", "/init.cql"]
+    restart: "no"
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.11
@@ -34,3 +53,5 @@ services:
     ports:
       - "8123:8123"
       - "9000:9000"
+    volumes:
+      - ./init/init-clickhouse.sql:/docker-entrypoint-initdb.d/init.sql:ro

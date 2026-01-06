@@ -1,4 +1,5 @@
 use crate::db::QueryResult;
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde_json::Value as JsonValue;
 use tokio_postgres::types::Type;
 use tokio_postgres::{Client, Error, NoTls, Row};
@@ -132,8 +133,11 @@ impl PostgresClient {
             Type::FLOAT4 => row
                 .try_get::<_, Option<f32>>(idx)
                 .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
-            Type::FLOAT8 | Type::NUMERIC => row
+            Type::FLOAT8 => row
                 .try_get::<_, Option<f64>>(idx)
+                .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::NUMERIC => row
+                .try_get::<_, Option<rust_decimal::Decimal>>(idx)
                 .map(|v| v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())),
             Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN => row
                 .try_get::<_, Option<String>>(idx)
@@ -141,6 +145,18 @@ impl PostgresClient {
             Type::JSON | Type::JSONB => row
                 .try_get::<_, Option<JsonValue>>(idx)
                 .map(|v| v.map(|j| j.to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::TIMESTAMP => row
+                .try_get::<_, Option<NaiveDateTime>>(idx)
+                .map(|v| v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f").to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::TIMESTAMPTZ => row
+                .try_get::<_, Option<DateTime<Utc>>>(idx)
+                .map(|v| v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::DATE => row
+                .try_get::<_, Option<NaiveDate>>(idx)
+                .map(|v| v.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "NULL".to_string())),
+            Type::TIME => row
+                .try_get::<_, Option<NaiveTime>>(idx)
+                .map(|v| v.map(|t| t.format("%H:%M:%S%.3f").to_string()).unwrap_or_else(|| "NULL".to_string())),
             _ => {
                 // For unsupported types, try string first, then show type name
                 row.try_get::<_, Option<String>>(idx)

@@ -16,7 +16,7 @@ const BLUE: Color = Color::Rgb(70, 115, 150); // Dim blue
 const SUCCESS: Color = Color::Rgb(130, 160, 110); // Muted green
 const WARNING: Color = Color::Rgb(190, 160, 100); // Muted gold
 const SURFACE: Color = Color::Rgb(40, 42, 46); // Dark background
-const SURFACE_LIGHT: Color = Color::Rgb(52, 54, 58); // Slightly lighter
+const SURFACE_LIGHT: Color = Color::Rgb(46, 48, 52); // Slightly lighter
 const TEXT: Color = Color::Rgb(190, 190, 185); // Light text
 const TEXT_DIM: Color = Color::Rgb(100, 100, 96); // Dimmed text
 const HIGHLIGHT: Color = Color::Rgb(60, 58, 52); // Subtle warm selection
@@ -250,14 +250,13 @@ impl App {
         let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
 
         let block = Block::default()
-            .title(" Explorer ")
-            .title_style(
-                Style::default()
-                    .fg(if is_focused { BLUE } else { TEXT_DIM })
-                    .add_modifier(Modifier::BOLD),
-            )
+            .title(Line::from(vec![
+                Span::styled("── ", Style::default().fg(border_color)),
+                Span::styled("Explorer", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" ──", Style::default().fg(border_color)),
+            ]))
             .borders(Borders::RIGHT)
-            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Plain)
             .border_style(Style::default().fg(border_color))
             .style(Style::default().bg(bg_color));
 
@@ -282,14 +281,13 @@ impl App {
         let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
 
         let block = Block::default()
-            .title(" Query: ")
-            .title_style(
-                Style::default()
-                    .fg(if is_focused { BLUE } else { TEXT_DIM })
-                    .add_modifier(Modifier::BOLD),
-            )
+            .title(Line::from(vec![
+                Span::styled("── ", Style::default().fg(border_color)),
+                Span::styled("Query", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" ──", Style::default().fg(border_color)),
+            ]))
             .borders(Borders::BOTTOM)
-            .border_type(BorderType::Rounded)
+            .border_type(BorderType::Plain)
             .border_style(Style::default().fg(border_color))
             .style(Style::default().bg(bg_color));
 
@@ -309,16 +307,14 @@ impl App {
         let is_focused = tab.focus == Focus::Output;
         let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
 
+        let border_color = if is_focused { BLUE } else { TEXT_DIM };
+
         let block = Block::default()
-            .title(" Results ")
-            .title_style(
-                Style::default()
-                    .fg(if is_focused { SUCCESS } else { TEXT_DIM })
-                    .add_modifier(Modifier::BOLD),
-            )
-            .borders(Borders::TOP)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if is_focused { SUCCESS } else { TEXT_DIM }))
+            .title(Line::from(vec![
+                Span::styled("── ", Style::default().fg(border_color)),
+                Span::styled("Results", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" ──", Style::default().fg(border_color)),
+            ]))
             .style(Style::default().bg(bg_color));
 
         let inner_area = block.inner(area);
