@@ -265,7 +265,7 @@ impl App {
             .highlight_style(
                 Style::default().bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT }).fg(TEXT),
             )
-            .highlight_symbol(if is_focused { "> " } else { " " });
+            .highlight_symbol("> ");
 
         let mut list_state = ListState::default();
         list_state.select(Some(tab.sidebar.selected));
