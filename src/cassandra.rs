@@ -60,7 +60,7 @@ impl CassandraClient {
         let mut keyspaces = Vec::new();
         if let Some(rows) = rows.rows {
             for row in rows {
-                if let Some(CqlValue::Text(s)) | Some(CqlValue::Ascii(s)) = &row.columns[0] {
+                if let Some(CqlValue::Text(s) | CqlValue::Ascii(s)) = row.columns.get(0).and_then(|v| v.as_ref()) {
                     if include_system || !SYSTEM_KEYSPACES.contains(&s.as_str()) {
                         keyspaces.push(s.clone());
                     }
@@ -88,9 +88,9 @@ impl CassandraClient {
         if let Some(rows) = rows.rows {
             for row in rows {
                 // Check if keyspace matches
-                if let Some(CqlValue::Text(ks)) | Some(CqlValue::Ascii(ks)) = &row.columns[0] {
+                if let Some(CqlValue::Text(ks) | CqlValue::Ascii(ks)) = row.columns.get(0).and_then(|v| v.as_ref()) {
                     if ks == keyspace {
-                        if let Some(CqlValue::Text(t)) | Some(CqlValue::Ascii(t)) = &row.columns[1]
+                        if let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) = row.columns.get(1).and_then(|v| v.as_ref())
                         {
                             tables.push(t.clone());
                         }

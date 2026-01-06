@@ -7,6 +7,7 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 ## Supported Databases
 
 - **PostgreSQL** - native protocol.
+- **MySQL/MariaDB** - native protocol.
 - **Cassandra/ScyllaDB** - CQL protocol.
 - **ClickHouse** - HTTP API.
 
@@ -57,9 +58,10 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 
 ## Configuration
 
-Configuration is loaded from:
-1. `./sqli.toml` (current directory)
-2. `~/.config/sqli/config.toml`
+Configuration is loaded from (in order of priority):
+1. `--config` flag (e.g., `sqli --config /path/to/config.toml`)
+2. `./sqli.toml` (current directory)
+3. `~/.config/sqli/config.toml`
 
 ### Example config.toml
 
@@ -76,6 +78,13 @@ type = "postgres"
 host = "db.example.com"
 user = "admin"
 password_cmd = "pass show db/production"
+
+[local-mysql]
+type = "mysql"
+host = "localhost"
+port = 3306
+user = "root"
+password = "secret"
 
 [analytics]
 type = "clickhouse"
