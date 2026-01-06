@@ -252,7 +252,10 @@ impl App {
         let block = Block::default()
             .title(Line::from(vec![
                 Span::styled("── ", Style::default().fg(border_color)),
-                Span::styled("Explorer", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Explorer",
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" ──", Style::default().fg(border_color)),
             ]))
             .borders(Borders::RIGHT)
@@ -265,7 +268,7 @@ impl App {
             .highlight_style(
                 Style::default().bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT }).fg(TEXT),
             )
-            .highlight_symbol("> ");
+            .highlight_symbol(if is_focused { "> " } else { "  " });
 
         let mut list_state = ListState::default();
         list_state.select(Some(tab.sidebar.selected));
@@ -283,7 +286,10 @@ impl App {
         let block = Block::default()
             .title(Line::from(vec![
                 Span::styled("── ", Style::default().fg(border_color)),
-                Span::styled("Query", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Query",
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" ──", Style::default().fg(border_color)),
             ]))
             .borders(Borders::BOTTOM)
@@ -312,7 +318,10 @@ impl App {
         let block = Block::default()
             .title(Line::from(vec![
                 Span::styled("── ", Style::default().fg(border_color)),
-                Span::styled("Results", Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Results",
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" ──", Style::default().fg(border_color)),
             ]))
             .style(Style::default().bg(bg_color));
