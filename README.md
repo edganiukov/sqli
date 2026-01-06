@@ -19,6 +19,11 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 - Results viewer with scrolling.
 - TOML configuration file with password command support.
 
+## Screenshots
+
+![Connection View](examples/screenshots/conn_view.png)
+![Database View](examples/screenshots/db_view.png)
+
 ## Keybindings
 
 ### Global
