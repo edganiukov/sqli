@@ -22,6 +22,7 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 ## Screenshots
 
 ![Connection View](examples/screenshots/conn_view.png)
+
 ![Database View](examples/screenshots/db_view.png)
 
 ## Keybindings

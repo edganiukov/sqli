@@ -78,11 +78,8 @@ impl App {
                 .map(|db| format!(" {} ", db))
                 .unwrap_or_else(|| " No database ".to_string());
 
-            let conn_info = tab
-                .connected_db
-                .as_ref()
-                .map(|c| format!(" {} ", c))
-                .unwrap_or_default();
+            let conn_info =
+                tab.connected_db.as_ref().map(|c| format!(" {} ", c)).unwrap_or_default();
 
             Paragraph::new(Line::from(vec![
                 Span::styled(conn_info, Style::default().fg(TEXT).bg(SURFACE_LIGHT)),
@@ -116,10 +113,7 @@ impl App {
         for (i, tab) in self.controller.tabs.iter().enumerate() {
             let tab_name = format!(" {} ", tab.name);
             let style = if i == self.controller.current_tab {
-                Style::default()
-                    .fg(SURFACE)
-                    .bg(BLUE)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(SURFACE).bg(BLUE).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT_DIM).bg(SURFACE_LIGHT)
             };
@@ -227,22 +221,24 @@ impl App {
             .sidebar
             .items
             .iter()
-            .map(|item| {
+            .enumerate()
+            .map(|(i, item)| {
                 let (prefix, name, style) = match item {
-                    SidebarItem::Database(db) => {
-                        let arrow = if tab.sidebar.expanded.contains(db) {
-                            "▼ "
-                        } else {
-                            "▶ "
-                        };
-                        (
-                            arrow.to_string(),
-                            db.clone(),
-                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                        )
-                    }
+                    SidebarItem::Database(db) => (
+                        "".to_string(),
+                        db.clone(),
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
                     SidebarItem::Table { table, .. } => {
-                        ("   ".to_string(), table.clone(), Style::default().fg(TEXT))
+                        // Check if next item is a database or end (this table is last in group)
+                        let is_last = tab
+                            .sidebar
+                            .items
+                            .get(i + 1)
+                            .map(|next| matches!(next, SidebarItem::Database(_)))
+                            .unwrap_or(true);
+                        let prefix = if is_last { "└─ " } else { "├─ " };
+                        (prefix.to_string(), table.clone(), Style::default().fg(TEXT))
                     }
                 };
                 ListItem::new(Line::from(vec![
@@ -260,9 +256,7 @@ impl App {
                 Span::styled("── ", Style::default().fg(border_color)),
                 Span::styled(
                     "Explorer",
-                    Style::default()
-                        .fg(border_color)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" ──", Style::default().fg(border_color)),
             ]))
@@ -274,9 +268,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(
-                Style::default()
-                    .bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT })
-                    .fg(TEXT),
+                Style::default().bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT }).fg(TEXT),
             )
             .highlight_symbol(if is_focused { "> " } else { "  " });
 
@@ -298,9 +290,7 @@ impl App {
                 Span::styled("── ", Style::default().fg(border_color)),
                 Span::styled(
                     "Query",
-                    Style::default()
-                        .fg(border_color)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" ──", Style::default().fg(border_color)),
             ]))
@@ -309,23 +299,15 @@ impl App {
             .border_style(Style::default().fg(border_color))
             .style(Style::default().bg(bg_color));
 
-        self.controller
-            .query_textarea
-            .set_style(Style::default().bg(bg_color).fg(TEXT));
-        self.controller
-            .query_textarea
-            .set_cursor_style(Style::default().bg(if is_focused {
-                Color::White
-            } else {
-                TEXT_DIM
-            }));
-        self.controller
-            .query_textarea
-            .set_cursor_line_style(Style::default());
+        self.controller.query_textarea.set_style(Style::default().bg(bg_color).fg(TEXT));
+        self.controller.query_textarea.set_cursor_style(Style::default().bg(if is_focused {
+            Color::White
+        } else {
+            TEXT_DIM
+        }));
+        self.controller.query_textarea.set_cursor_line_style(Style::default());
         self.controller.query_textarea.set_block(block);
-        self.controller
-            .query_textarea
-            .set_line_number_style(Style::default().fg(TEXT_DIM));
+        self.controller.query_textarea.set_line_number_style(Style::default().fg(TEXT_DIM));
         frame.render_widget(&self.controller.query_textarea, area);
     }
 
@@ -341,9 +323,7 @@ impl App {
                 Span::styled("── ", Style::default().fg(border_color)),
                 Span::styled(
                     "Results",
-                    Style::default()
-                        .fg(border_color)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" ──", Style::default().fg(border_color)),
             ]))
@@ -386,36 +366,31 @@ impl App {
                         Cell::from(h.as_str())
                             .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
-                    let header = Row::new(header_cells)
-                        .height(1)
-                        .style(Style::default().bg(SURFACE_LIGHT));
+                    let header =
+                        Row::new(header_cells).height(1).style(Style::default().bg(SURFACE_LIGHT));
 
                     // Calculate visible rows based on scroll position
                     let visible_height = inner_area.height.saturating_sub(1) as usize; // -1 for header
                     let scroll = tab.result_scroll;
                     let cursor = tab.result_cursor;
 
-                    let visible_rows = rows
-                        .iter()
-                        .enumerate()
-                        .skip(scroll)
-                        .take(visible_height)
-                        .map(|(idx, row)| {
-                            let cells = row
-                                .iter()
-                                .map(|c| Cell::from(c.as_str()).style(Style::default().fg(TEXT)));
-                            let row = Row::new(cells).height(1);
-                            if idx == cursor && is_focused {
-                                row.style(Style::default().bg(HIGHLIGHT))
-                            } else {
-                                row.style(Style::default().bg(bg_color))
-                            }
-                        });
+                    let visible_rows =
+                        rows.iter().enumerate().skip(scroll).take(visible_height).map(
+                            |(idx, row)| {
+                                let cells = row.iter().map(|c| {
+                                    Cell::from(c.as_str()).style(Style::default().fg(TEXT))
+                                });
+                                let row = Row::new(cells).height(1);
+                                if idx == cursor && is_focused {
+                                    row.style(Style::default().bg(HIGHLIGHT))
+                                } else {
+                                    row.style(Style::default().bg(bg_color))
+                                }
+                            },
+                        );
 
-                    let widths: Vec<Constraint> = col_widths
-                        .iter()
-                        .map(|&w| Constraint::Length(w as u16))
-                        .collect();
+                    let widths: Vec<Constraint> =
+                        col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
 
                     let table = Table::new(visible_rows, widths)
                         .header(header)
