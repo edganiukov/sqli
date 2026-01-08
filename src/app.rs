@@ -96,7 +96,7 @@ impl App {
             Paragraph::new(Line::from(vec![
                 Span::styled(db_name, Style::default().fg(SURFACE).bg(SUCCESS)),
                 Span::styled(
-                    format!("{}{}", ro_suffix, table_name),
+                    format!("{}{} > ", ro_suffix, table_name),
                     Style::default().fg(TEXT),
                 ),
                 Span::styled(status_msg, Style::default().fg(TEXT_DIM)),
