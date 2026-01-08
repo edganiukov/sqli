@@ -4,8 +4,10 @@ mod clickhouse;
 mod config;
 mod controller;
 mod db;
+mod editor;
 mod mysql;
 mod postgres;
+mod templates;
 
 use std::io;
 use std::path::PathBuf;
@@ -58,6 +60,11 @@ fn run(
     let mut app = App::new(controller);
 
     loop {
+        // Check if a full redraw is needed (e.g., after external editor)
+        if app.needs_redraw() {
+            terminal.clear()?;
+        }
+
         terminal.draw(|frame| app.draw(frame))?;
 
         if let Event::Key(key) = event::read()? {

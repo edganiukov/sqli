@@ -1,11 +1,12 @@
-use crate::controller::{Controller, Focus, Mode, SidebarItem, ViewState};
+use crate::controller::{Controller, Focus, Mode, PopupState, SidebarItem, ViewState};
 use crate::db::QueryResult;
+use crate::templates::TemplateScope;
 use crossterm::event::KeyEvent;
 use ratatui::prelude::*;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+    Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
 };
 
 const PADDING: u16 = 1;
@@ -32,6 +33,15 @@ impl App {
 
     pub fn quit(&self) -> bool {
         self.controller.quit
+    }
+
+    pub fn needs_redraw(&mut self) -> bool {
+        if self.controller.needs_redraw {
+            self.controller.needs_redraw = false;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn handle_key(&mut self, key_event: KeyEvent) {
@@ -120,6 +130,9 @@ impl App {
             Paragraph::new(":help for commands").style(Style::default().fg(TEXT_DIM).bg(SURFACE))
         };
         frame.render_widget(command_line, chunks[3]);
+
+        // Draw popup overlay if active
+        self.draw_popup(frame);
     }
 
     fn draw_tabs(&self, frame: &mut Frame, area: Rect) {
@@ -433,5 +446,202 @@ impl App {
                 frame.render_widget(msg, inner_area);
             }
         }
+    }
+
+    fn draw_popup(&self, frame: &mut Frame) {
+        match &self.controller.popup_state {
+            PopupState::TemplateList { selected } => {
+                self.draw_template_list_popup(frame, *selected);
+            }
+            PopupState::SaveTemplate { name, scope } => {
+                self.draw_save_template_popup(frame, name, scope);
+            }
+            PopupState::ConfirmDelete { name, .. } => {
+                self.draw_confirm_delete_popup(frame, name);
+            }
+            PopupState::None => {}
+        }
+    }
+
+    fn draw_template_list_popup(&self, frame: &mut Frame, selected: usize) {
+        let area = frame.area();
+        let templates = &self.controller.template_list_cache;
+
+        // Calculate centered popup area (60% width, 70% height)
+        let popup_width = ((area.width as f32 * 0.6) as u16).max(40).min(area.width);
+        let popup_height = ((area.height as f32 * 0.7) as u16).max(10).min(area.height);
+        let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+        let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+        let popup_area = Rect {
+            x: popup_x,
+            y: popup_y,
+            width: popup_width,
+            height: popup_height,
+        };
+
+        // Clear background
+        frame.render_widget(Clear, popup_area);
+
+        // Build list items with preview
+        let items: Vec<ListItem> = templates
+            .iter()
+            .map(|t| {
+                let scope_str = match &t.scope {
+                    TemplateScope::Global => "[global]".to_string(),
+                    TemplateScope::Connection(name) => format!("[{}]", name),
+                };
+                let preview: String =
+                    t.query.lines().next().unwrap_or("").chars().take(40).collect();
+
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(scope_str, Style::default().fg(TEXT_DIM)),
+                        Span::raw(" "),
+                        Span::styled(
+                            &t.name,
+                            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(Span::styled(
+                        format!("  {}", preview),
+                        Style::default().fg(TEXT_DIM),
+                    )),
+                ])
+            })
+            .collect();
+
+        let block = Block::default()
+            .title(" Templates (Ctrl+G edit, Ctrl+D delete) ")
+            .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(BLUE))
+            .style(Style::default().bg(SURFACE));
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
+            .highlight_symbol("> ");
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(selected.min(templates.len().saturating_sub(1))));
+
+        frame.render_stateful_widget(list, popup_area, &mut list_state);
+    }
+
+    fn draw_save_template_popup(&self, frame: &mut Frame, name: &str, scope: &TemplateScope) {
+        let area = frame.area();
+
+        let popup_width = 50_u16.min(area.width);
+        let popup_height = 9_u16.min(area.height);
+        let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+        let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+        let popup_area = Rect {
+            x: popup_x,
+            y: popup_y,
+            width: popup_width,
+            height: popup_height,
+        };
+
+        // Clear background
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(" Save Template ")
+            .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(BLUE))
+            .style(Style::default().bg(SURFACE));
+
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Label
+                Constraint::Length(1), // Input
+                Constraint::Length(1), // Spacer
+                Constraint::Length(1), // Scope toggle
+                Constraint::Length(1), // Help
+            ])
+            .margin(1)
+            .split(inner);
+
+        frame.render_widget(
+            Paragraph::new("Template name:").style(Style::default().fg(TEXT)),
+            chunks[0],
+        );
+
+        // Input field with cursor
+        let input_display = format!("{}_", name);
+        frame.render_widget(
+            Paragraph::new(input_display).style(Style::default().fg(TEXT).bg(SURFACE_LIGHT)),
+            chunks[1],
+        );
+
+        let scope_text = match scope {
+            TemplateScope::Global => "[x] Global (all connections)",
+            TemplateScope::Connection(conn) => &format!("[ ] Local ({})", conn),
+        };
+        frame.render_widget(
+            Paragraph::new(format!("Tab to toggle: {}", scope_text))
+                .style(Style::default().fg(TEXT_DIM)),
+            chunks[3],
+        );
+
+        frame.render_widget(
+            Paragraph::new("Enter to save, Esc to cancel").style(Style::default().fg(TEXT_DIM)),
+            chunks[4],
+        );
+    }
+
+    fn draw_confirm_delete_popup(&self, frame: &mut Frame, template_name: &str) {
+        let area = frame.area();
+
+        let popup_width = 40_u16.min(area.width);
+        let popup_height = 5_u16.min(area.height);
+        let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+        let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+        let popup_area = Rect {
+            x: popup_x,
+            y: popup_y,
+            width: popup_width,
+            height: popup_height,
+        };
+
+        // Clear background
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(" Confirm Delete ")
+            .title_style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(WARNING))
+            .style(Style::default().bg(SURFACE));
+
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .margin(1)
+            .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(format!("Delete '{}'?", template_name)).style(Style::default().fg(TEXT)),
+            chunks[0],
+        );
+
+        frame.render_widget(
+            Paragraph::new("(y)es/(n)o").style(Style::default().fg(TEXT_DIM)),
+            chunks[1],
+        );
     }
 }

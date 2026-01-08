@@ -3,11 +3,12 @@ use crate::clickhouse::ClickHouseClient;
 use crate::db::{DatabaseClient, QueryResult};
 use crate::mysql::MySqlClient;
 use crate::postgres::PostgresClient;
+use crate::templates::{Template, TemplateScope, TemplateStore};
 use chrono::Local;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashMap;
 use tokio::runtime::Runtime;
-use tui_textarea::TextArea;
+use tui_textarea::{CursorMove, TextArea};
 
 #[derive(Debug, PartialEq)]
 pub enum Mode {
@@ -26,6 +27,20 @@ pub enum Focus {
     Sidebar,
     Query,
     Output,
+}
+
+#[derive(Debug, Clone)]
+pub enum PopupState {
+    None,
+    TemplateList { selected: usize },
+    SaveTemplate { name: String, scope: TemplateScope },
+    ConfirmDelete { index: usize, name: String },
+}
+
+impl Default for PopupState {
+    fn default() -> Self {
+        PopupState::None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -236,12 +251,17 @@ pub struct Controller {
     pub current_tab: usize,
     pub quit: bool,
     pub runtime: Runtime,
+    pub popup_state: PopupState,
+    pub template_store: TemplateStore,
+    pub template_list_cache: Vec<Template>,
+    pub needs_redraw: bool,
 }
 
 impl Controller {
     pub fn new(config_path: Option<std::path::PathBuf>) -> Self {
         let connections = crate::config::load_config(config_path);
         let runtime = Runtime::new().expect("Failed to create tokio runtime");
+        let template_store = TemplateStore::load();
 
         Self {
             mode: Mode::Normal,
@@ -251,6 +271,10 @@ impl Controller {
             current_tab: 0,
             quit: false,
             runtime,
+            popup_state: PopupState::default(),
+            template_store,
+            template_list_cache: Vec::new(),
+            needs_redraw: false,
         }
     }
 
@@ -534,6 +558,12 @@ impl Controller {
     }
 
     fn handle_query_keys(&mut self, key_event: KeyEvent) {
+        // Handle popup state first
+        if !matches!(self.popup_state, PopupState::None) {
+            self.handle_popup_keys(key_event);
+            return;
+        }
+
         // Check for execute shortcut first (F5 or Ctrl+J)
         if key_event.code == KeyCode::F(5) {
             self.execute_query();
@@ -544,6 +574,27 @@ impl Controller {
             && key_event.code == KeyCode::Char('j')
         {
             self.execute_query();
+            return;
+        }
+        // Ctrl+O to open template list
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('o')
+        {
+            self.open_template_popup();
+            return;
+        }
+        // Ctrl+S to save current query as template
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('s')
+        {
+            self.open_save_template_popup();
+            return;
+        }
+        // Ctrl+G to edit query in external editor
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('g')
+        {
+            self.edit_query_in_editor();
             return;
         }
 
@@ -769,7 +820,7 @@ impl Controller {
     }
 
     fn show_help(&mut self) {
-        let help = ":q quit | :new tab | :next/:prev tabs | :sysdb system dbs | F5/Ctrl+J exec | Tab focus | r refresh";
+        let help = ":q quit | F5/Ctrl+J exec | Ctrl+O templates | Ctrl+S save | Ctrl+G edit in $EDITOR";
         self.current_tab_mut().status_message = Some(help.to_string());
     }
 
@@ -844,5 +895,279 @@ impl Controller {
             first_word.as_str(),
             "SELECT" | "SHOW" | "DESCRIBE" | "DESC" | "EXPLAIN" | "WITH" | "USE" | "HELP" | "LIST"
         )
+    }
+
+    // Template management methods
+
+    fn open_template_popup(&mut self) {
+        let conn_name = self
+            .current_tab()
+            .connected_db
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        self.template_list_cache = self
+            .template_store
+            .get_templates_for_connection(conn_name)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        if self.template_list_cache.is_empty() {
+            self.current_tab_mut().status_message =
+                Some("No templates saved. Use Ctrl+S to save a template.".to_string());
+            return;
+        }
+
+        self.popup_state = PopupState::TemplateList { selected: 0 };
+    }
+
+    fn open_save_template_popup(&mut self) {
+        let query: String = self.query_textarea.lines().join("\n");
+        if query.trim().is_empty() {
+            self.current_tab_mut().status_message =
+                Some("Cannot save empty query as template".to_string());
+            return;
+        }
+
+        // Default scope based on current connection
+        let scope = match &self.current_tab().connected_db {
+            Some(conn) => TemplateScope::Connection(conn.clone()),
+            None => TemplateScope::Global,
+        };
+
+        self.popup_state = PopupState::SaveTemplate {
+            name: String::new(),
+            scope,
+        };
+    }
+
+    fn handle_popup_keys(&mut self, key_event: KeyEvent) {
+        match &self.popup_state.clone() {
+            PopupState::TemplateList { selected } => {
+                self.handle_template_list_keys(key_event, *selected);
+            }
+            PopupState::SaveTemplate { name, scope } => {
+                self.handle_save_template_keys(key_event, name.clone(), scope.clone());
+            }
+            PopupState::ConfirmDelete { index, name } => {
+                self.handle_confirm_delete_keys(key_event, *index, name.clone());
+            }
+            PopupState::None => {}
+        }
+    }
+
+    fn handle_template_list_keys(&mut self, key_event: KeyEvent, selected: usize) {
+        match key_event.code {
+            KeyCode::Esc => {
+                self.popup_state = PopupState::None;
+            }
+            KeyCode::Enter => {
+                self.apply_selected_template(selected);
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                let max = self.template_list_cache.len().saturating_sub(1);
+                let new_selected = (selected + 1).min(max);
+                self.popup_state = PopupState::TemplateList {
+                    selected: new_selected,
+                };
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                let new_selected = selected.saturating_sub(1);
+                self.popup_state = PopupState::TemplateList {
+                    selected: new_selected,
+                };
+            }
+            KeyCode::Char('d') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(template) = self.template_list_cache.get(selected) {
+                    self.popup_state = PopupState::ConfirmDelete {
+                        index: selected,
+                        name: template.name.clone(),
+                    };
+                }
+            }
+            KeyCode::Char('g') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.edit_template_in_editor(selected);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_save_template_keys(
+        &mut self,
+        key_event: KeyEvent,
+        mut name: String,
+        mut scope: TemplateScope,
+    ) {
+        match key_event.code {
+            KeyCode::Esc => {
+                self.popup_state = PopupState::None;
+            }
+            KeyCode::Enter => {
+                if !name.trim().is_empty() {
+                    self.save_current_template(name.trim().to_string(), scope);
+                    self.popup_state = PopupState::None;
+                }
+            }
+            KeyCode::Tab => {
+                // Toggle between global and connection-specific
+                scope = match scope {
+                    TemplateScope::Global => {
+                        match &self.current_tab().connected_db {
+                            Some(conn) => TemplateScope::Connection(conn.clone()),
+                            None => TemplateScope::Global,
+                        }
+                    }
+                    TemplateScope::Connection(_) => TemplateScope::Global,
+                };
+                self.popup_state = PopupState::SaveTemplate { name, scope };
+            }
+            KeyCode::Char(c) => {
+                name.push(c);
+                self.popup_state = PopupState::SaveTemplate { name, scope };
+            }
+            KeyCode::Backspace => {
+                name.pop();
+                self.popup_state = PopupState::SaveTemplate { name, scope };
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_confirm_delete_keys(&mut self, key_event: KeyEvent, index: usize, _name: String) {
+        match key_event.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                // Find the actual index in template_store
+                if let Some(template) = self.template_list_cache.get(index) {
+                    // Find and delete from store
+                    let template_name = template.name.clone();
+                    if let Some(store_idx) = self
+                        .template_store
+                        .templates
+                        .iter()
+                        .position(|t| t.name == template_name)
+                    {
+                        self.template_store.delete_template(store_idx);
+                        let _ = self.template_store.save();
+                        self.current_tab_mut().status_message =
+                            Some(format!("Deleted template '{}'", template_name));
+                    }
+                }
+                // Refresh and go back to list
+                self.open_template_popup();
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                // Go back to template list
+                self.popup_state = PopupState::TemplateList { selected: index };
+            }
+            _ => {}
+        }
+    }
+
+    fn save_current_template(&mut self, name: String, scope: TemplateScope) {
+        let query: String = self.query_textarea.lines().join("\n");
+
+        let template = Template {
+            name: name.clone(),
+            query,
+            scope,
+        };
+
+        self.template_store.add_template(template);
+        if let Err(e) = self.template_store.save() {
+            self.current_tab_mut().status_message = Some(format!("Failed to save template: {}", e));
+        } else {
+            self.current_tab_mut().status_message = Some(format!("Saved template '{}'", name));
+        }
+    }
+
+    fn apply_selected_template(&mut self, selected: usize) {
+        let template = match self.template_list_cache.get(selected) {
+            Some(t) => t.clone(),
+            None => return,
+        };
+
+        // Insert query into text area
+        self.query_textarea.select_all();
+        self.query_textarea.cut();
+        self.query_textarea.insert_str(&template.query);
+
+        // Position cursor at first <placeholder>
+        if let Some((line, col, _len)) = crate::templates::find_placeholder(&template.query) {
+            // Move to start
+            self.query_textarea.move_cursor(CursorMove::Top);
+            self.query_textarea.move_cursor(CursorMove::Head);
+
+            // Move to target line
+            for _ in 0..line {
+                self.query_textarea.move_cursor(CursorMove::Down);
+            }
+
+            // Move to target column (at the '<')
+            for _ in 0..col {
+                self.query_textarea.move_cursor(CursorMove::Forward);
+            }
+        }
+
+        self.popup_state = PopupState::None;
+        self.current_tab_mut().status_message =
+            Some(format!("Inserted template '{}'", template.name));
+    }
+
+    fn edit_query_in_editor(&mut self) {
+        let current_query: String = self.query_textarea.lines().join("\n");
+
+        match crate::editor::edit_in_external_editor(&current_query, "sql") {
+            Ok(edited) => {
+                self.query_textarea.select_all();
+                self.query_textarea.cut();
+                self.query_textarea.insert_str(&edited.trim_end());
+                self.current_tab_mut().status_message = Some("Query updated from editor".to_string());
+            }
+            Err(e) => {
+                self.current_tab_mut().status_message = Some(format!("Editor error: {}", e));
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    fn edit_template_in_editor(&mut self, selected: usize) {
+        let template = match self.template_list_cache.get(selected) {
+            Some(t) => t.clone(),
+            None => return,
+        };
+
+        match crate::editor::edit_in_external_editor(&template.query, "sql") {
+            Ok(edited) => {
+                let edited_query = edited.trim_end().to_string();
+
+                // Find and update the template in the store
+                if let Some(store_template) = self
+                    .template_store
+                    .templates
+                    .iter_mut()
+                    .find(|t| t.name == template.name)
+                {
+                    store_template.query = edited_query;
+                    if let Err(e) = self.template_store.save() {
+                        self.current_tab_mut().status_message =
+                            Some(format!("Failed to save template: {}", e));
+                    } else {
+                        self.current_tab_mut().status_message =
+                            Some(format!("Updated template '{}'", template.name));
+                    }
+                }
+
+                // Refresh the cache
+                self.open_template_popup();
+                // Restore selection
+                self.popup_state = PopupState::TemplateList { selected };
+            }
+            Err(e) => {
+                self.current_tab_mut().status_message = Some(format!("Editor error: {}", e));
+            }
+        }
+        self.needs_redraw = true;
     }
 }
