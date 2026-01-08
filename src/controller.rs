@@ -56,6 +56,7 @@ pub struct DatabaseConn {
     pub user: String,
     pub password: String,
     pub tls: bool,
+    pub readonly: bool,
 }
 
 impl DatabaseConn {
@@ -670,6 +671,13 @@ impl Controller {
             }
         };
 
+        // Block non-read operations on readonly connections
+        if conn.readonly && !Self::is_read_query(&query) {
+            self.current_tab_mut().status_message =
+                Some("Connection is read-only, only SELECT queries allowed".to_string());
+            return;
+        }
+
         // Use selected database or fall back to default
         let (db_name, using_default) = match self.current_tab().current_database.clone() {
             Some(db) => (db, false),
@@ -822,5 +830,19 @@ impl Controller {
                 tab.status_message = Some(format!("Failed to refresh databases: {}", e));
             }
         }
+    }
+
+    fn is_read_query(query: &str) -> bool {
+        let first_word = query
+            .trim()
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_uppercase();
+
+        matches!(
+            first_word.as_str(),
+            "SELECT" | "SHOW" | "DESCRIBE" | "DESC" | "EXPLAIN" | "WITH" | "USE" | "HELP" | "LIST"
+        )
     }
 }

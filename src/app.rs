@@ -72,20 +72,34 @@ impl App {
         let status_msg = tab.status_message.as_deref().unwrap_or("");
 
         let status_line = if view_state == ViewState::DatabaseView {
-            let db_info = tab
+            let conn = tab.connections.get(tab.selected_index);
+
+            let db_name = tab
                 .current_database
                 .as_ref()
                 .map(|db| format!(" {} ", db))
-                .unwrap_or_else(|| " No database ".to_string());
+                .unwrap_or_else(|| " (none) ".to_string());
 
-            let conn_info =
-                tab.connected_db.as_ref().map(|c| format!(" {} ", c)).unwrap_or_default();
+            let table_name = tab
+                .sidebar
+                .items
+                .get(tab.sidebar.selected)
+                .and_then(|item| match item {
+                    SidebarItem::Table { table, .. } => Some(format!(" > {}", table)),
+                    _ => None,
+                })
+                .unwrap_or_default();
+
+            let is_readonly = conn.map(|c| c.readonly).unwrap_or(false);
+            let ro_suffix = if is_readonly { " > [RO]" } else { "" };
 
             Paragraph::new(Line::from(vec![
-                Span::styled(conn_info, Style::default().fg(TEXT).bg(SURFACE_LIGHT)),
-                Span::styled(db_info, Style::default().fg(SURFACE).bg(BLUE)),
-                Span::raw(" "),
-                Span::styled(status_msg, Style::default().fg(TEXT)),
+                Span::styled(db_name, Style::default().fg(SURFACE).bg(SUCCESS)),
+                Span::styled(
+                    format!("{}{}", ro_suffix, table_name),
+                    Style::default().fg(TEXT),
+                ),
+                Span::styled(status_msg, Style::default().fg(TEXT_DIM)),
             ]))
             .style(Style::default().bg(SURFACE_LIGHT))
         } else {
