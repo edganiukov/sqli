@@ -255,7 +255,6 @@ pub struct Controller {
     pub template_store: TemplateStore,
     pub template_list_cache: Vec<Template>,
     pub needs_redraw: bool,
-    pub query_insert_mode: bool,
 }
 
 impl Controller {
@@ -276,16 +275,7 @@ impl Controller {
             template_store,
             template_list_cache: Vec::new(),
             needs_redraw: false,
-            query_insert_mode: false,
         }
-    }
-
-    fn enter_insert_mode(&mut self) {
-        self.query_insert_mode = true;
-    }
-
-    fn exit_insert_mode(&mut self) {
-        self.query_insert_mode = false;
     }
 
     pub fn current_tab(&self) -> &Tab {
@@ -574,113 +564,39 @@ impl Controller {
             return;
         }
 
-        // Check for execute shortcut (F5 works in both modes)
+        // Check for execute shortcut
         if key_event.code == KeyCode::F(5) {
             self.execute_query();
             return;
         }
 
-        if self.query_insert_mode {
-            // INSERT MODE - all keys go to textarea except Esc
+        // Ctrl shortcuts
+        if key_event.modifiers.contains(KeyModifiers::CONTROL) {
             match key_event.code {
-                KeyCode::Esc => {
-                    self.exit_insert_mode();
-                }
-                _ => {
-                    self.query_textarea.input(key_event);
-                }
-            }
-        } else {
-            // NORMAL MODE - vim-style navigation and commands
-            // Check Ctrl shortcuts first
-            if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                match key_event.code {
-                    KeyCode::Char('j') => self.execute_query(),
-                    KeyCode::Char('o') => self.open_template_popup(),
-                    KeyCode::Char('s') => self.open_save_template_popup(),
-                    KeyCode::Char('g') => self.edit_query_in_editor(),
-                    _ => {}
-                }
-                return;
-            }
-
-            match key_event.code {
-                KeyCode::Char(':') => {
-                    self.mode = Mode::Command;
-                    self.command_buffer.clear();
-                }
-                KeyCode::Char('i') => {
-                    self.enter_insert_mode();
-                }
-                KeyCode::Char('a') => {
-                    // Append: move cursor right then insert
-                    self.query_textarea.move_cursor(CursorMove::Forward);
-                    self.enter_insert_mode();
-                }
-                KeyCode::Char('A') => {
-                    // Append at end of line
-                    self.query_textarea.move_cursor(CursorMove::End);
-                    self.enter_insert_mode();
-                }
-                KeyCode::Char('I') => {
-                    // Insert at beginning of line
-                    self.query_textarea.move_cursor(CursorMove::Head);
-                    self.enter_insert_mode();
-                }
-                KeyCode::Char('o') => {
-                    // Open line below
-                    self.query_textarea.move_cursor(CursorMove::End);
-                    self.query_textarea.insert_newline();
-                    self.enter_insert_mode();
-                }
-                KeyCode::Char('O') => {
-                    // Open line above
-                    self.query_textarea.move_cursor(CursorMove::Head);
-                    self.query_textarea.insert_newline();
-                    self.query_textarea.move_cursor(CursorMove::Up);
-                    self.enter_insert_mode();
-                }
-                // Navigation
-                KeyCode::Char('h') | KeyCode::Left => {
-                    self.query_textarea.move_cursor(CursorMove::Back);
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.query_textarea.move_cursor(CursorMove::Down);
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.query_textarea.move_cursor(CursorMove::Up);
-                }
-                KeyCode::Char('l') | KeyCode::Right => {
-                    self.query_textarea.move_cursor(CursorMove::Forward);
-                }
-                KeyCode::Char('0') => {
-                    self.query_textarea.move_cursor(CursorMove::Head);
-                }
-                KeyCode::Char('$') => {
-                    self.query_textarea.move_cursor(CursorMove::End);
-                }
-                KeyCode::Char('w') => {
-                    self.query_textarea.move_cursor(CursorMove::WordForward);
-                }
-                KeyCode::Char('b') => {
-                    self.query_textarea.move_cursor(CursorMove::WordBack);
-                }
-                KeyCode::Char('g') => {
-                    self.query_textarea.move_cursor(CursorMove::Top);
-                }
-                KeyCode::Char('G') => {
-                    self.query_textarea.move_cursor(CursorMove::Bottom);
-                }
-                // Focus navigation
-                KeyCode::Tab => {
-                    self.current_tab_mut().focus = Focus::Output;
-                }
-                KeyCode::BackTab => {
-                    self.focus_sidebar();
-                }
+                KeyCode::Char('j') => self.execute_query(),
+                KeyCode::Char('o') => self.open_template_popup(),
+                KeyCode::Char('s') => self.open_save_template_popup(),
+                KeyCode::Char('g') => self.edit_query_in_editor(),
                 _ => {}
             }
+            return;
         }
+
+        // Focus navigation
+        match key_event.code {
+            KeyCode::Tab => {
+                self.current_tab_mut().focus = Focus::Output;
+                return;
+            }
+            KeyCode::BackTab | KeyCode::Esc => {
+                self.focus_sidebar();
+                return;
+            }
+            _ => {}
+        }
+
+        // All other keys go to textarea
+        self.query_textarea.input(key_event);
     }
 
     fn focus_sidebar(&mut self) {
