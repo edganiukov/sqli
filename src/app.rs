@@ -14,6 +14,7 @@ const PADDING: u16 = 1;
 // Color scheme
 const ACCENT: Color = Color::Rgb(180, 140, 100); // Warm tan
 const BLUE: Color = Color::Rgb(70, 115, 150); // Dim blue
+const GREEN: Color = Color::Rgb(130, 160, 110); // Dim green
 const SUCCESS: Color = Color::Rgb(130, 160, 110); // Muted green
 const WARNING: Color = Color::Rgb(190, 160, 100); // Muted gold
 const SURFACE: Color = Color::Rgb(30, 30, 35); // Cool dark background
@@ -84,10 +85,17 @@ impl App {
         let status_line = if view_state == ViewState::DatabaseView {
             let conn = tab.connections.get(tab.selected_index);
 
+            // Show vim mode indicator
+            let mode_span = if self.controller.query_insert_mode {
+                Span::styled(" INSERT ", Style::default().fg(SURFACE).bg(ACCENT))
+            } else {
+                Span::styled(" NORMAL ", Style::default().fg(SURFACE).bg(GREEN))
+            };
+
             let db_name = tab
                 .current_database
                 .as_ref()
-                .map(|db| format!(" {} ", db))
+                .map(|db| format!("{}", db))
                 .unwrap_or_else(|| " (none) ".to_string());
 
             let table_name = tab
@@ -104,9 +112,9 @@ impl App {
             let ro_suffix = if is_readonly { " > [RO]" } else { "" };
 
             Paragraph::new(Line::from(vec![
-                Span::styled(db_name, Style::default().fg(SURFACE).bg(SUCCESS)),
+                mode_span,
                 Span::styled(
-                    format!("{}{} > ", ro_suffix, table_name),
+                    format!(" > {}{}{} > ", db_name, ro_suffix, table_name),
                     Style::default().fg(TEXT),
                 ),
                 Span::styled(status_msg, Style::default().fg(TEXT_DIM)),

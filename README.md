@@ -15,7 +15,8 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 
 - Multi-tab interface.
 - Sidebar with databases and tables.
-- Query editor with vim-style navigation.
+- Query editor with vim-style navigation (NORMAL/INSERT modes).
+- Mode indicator in status bar.
 - Results viewer with scrolling.
 - TOML configuration file with password command support.
 - Query templates with `<placeholder>` support.
@@ -30,18 +31,34 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 ### Global
 | Key | Action |
 |-----|--------|
-| `:` | Enter command mode (not in Query Editor) |
+| `:` | Enter command mode |
 | `Tab` | Cycle focus: Sidebar -> Query -> Output |
 | `Shift+Tab` | Cycle focus backwards |
 | `F5` / `Ctrl+J` | Execute query |
 
-### Query Editor
+### Query Editor (NORMAL mode)
 | Key | Action |
 |-----|--------|
+| `i` | Enter INSERT mode |
+| `a` | Append (enter INSERT after cursor) |
+| `A` | Append at end of line |
+| `I` | Insert at beginning of line |
+| `o` | Open line below |
+| `O` | Open line above |
+| `h/j/k/l` | Navigate (vim-style) |
+| `w/b` | Word forward/back |
+| `0/$` | Beginning/end of line |
+| `g/G` | Top/bottom of editor |
+| `:` | Enter command mode |
 | `Ctrl+O` | Open templates list |
 | `Ctrl+S` | Save current query as template |
 | `Ctrl+G` | Edit query in external editor |
-| `Esc` | Exit to Sidebar (then `:` for commands) |
+
+### Query Editor (INSERT mode)
+| Key | Action |
+|-----|--------|
+| `Esc` | Exit to NORMAL mode |
+| Any key | Insert text |
 
 ### Templates Popup
 | Key | Action |
