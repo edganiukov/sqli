@@ -30,7 +30,7 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 ### Global
 | Key | Action |
 |-----|--------|
-| `:` | Enter command mode |
+| `:` | Enter command mode (not in Query Editor) |
 | `Tab` | Cycle focus: Sidebar -> Query -> Output |
 | `Shift+Tab` | Cycle focus backwards |
 | `F5` / `Ctrl+J` | Execute query |
@@ -41,6 +41,7 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 | `Ctrl+O` | Open templates list |
 | `Ctrl+S` | Save current query as template |
 | `Ctrl+G` | Edit query in external editor |
+| `Esc` | Exit to Sidebar (then `:` for commands) |
 
 ### Templates Popup
 | Key | Action |

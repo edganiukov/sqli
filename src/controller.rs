@@ -599,15 +599,15 @@ impl Controller {
         }
 
         match key_event.code {
-            KeyCode::Char(':') => {
-                self.mode = Mode::Command;
-                self.command_buffer.clear();
-            }
             KeyCode::Tab => {
                 self.current_tab_mut().focus = Focus::Output;
             }
             KeyCode::BackTab => {
                 self.focus_sidebar();
+            }
+            KeyCode::Esc => {
+                // Esc exits query editor to sidebar, where : enters command mode
+                self.current_tab_mut().focus = Focus::Sidebar;
             }
             _ => {
                 self.query_textarea.input(key_event);
