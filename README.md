@@ -1,8 +1,8 @@
 # sqli
 
-NOTE: the project is vibe-coded.
-
 A terminal-based SQL client with vim-style keybindings. Supports multiple database backends.
+
+**NOTE: the project is vibe-coded.**
 
 ## Supported Databases
 
@@ -18,10 +18,10 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 - Query editor with vim-style navigation.
 - Results viewer with scrolling.
 - TOML configuration file with password command support.
+- Query templates with `<placeholder>` support.
+- External editor integration (`$EDITOR` or vim).
 
 ## Screenshots
-
-![Connection View](examples/screenshots/conn_view.png)
 
 ![Database View](examples/screenshots/db_view.png)
 
@@ -34,6 +34,22 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 | `Tab` | Cycle focus: Sidebar -> Query -> Output |
 | `Shift+Tab` | Cycle focus backwards |
 | `F5` / `Ctrl+J` | Execute query |
+
+### Query Editor
+| Key | Action |
+|-----|--------|
+| `Ctrl+O` | Open templates list |
+| `Ctrl+S` | Save current query as template |
+| `Ctrl+G` | Edit query in external editor |
+
+### Templates Popup
+| Key | Action |
+|-----|--------|
+| `j/k` or arrows | Navigate templates |
+| `Enter` | Insert selected template |
+| `Ctrl+G` | Edit template in external editor |
+| `Ctrl+D` | Delete template |
+| `Esc` | Close popup |
 
 ### Sidebar
 | Key | Action |
@@ -112,6 +128,30 @@ port = 9042
 user = "cassandra"
 password = "cassandra"
 ```
+
+## Query Templates
+
+Templates are saved to `~/.config/sqli/templates.sql` in a simple format:
+
+```sql
+=== Count Rows [global]
+SELECT COUNT(*) FROM <table>
+
+=== Active Users [my-connection]
+SELECT * FROM users
+WHERE active = true
+LIMIT <limit>
+
+=== Find by ID [global]
+SELECT * FROM <table> WHERE id = <id>
+```
+
+- Each template starts with `=== Name [scope]`
+- Scope is either `global` (all connections) or a connection name
+- Templates can contain `<placeholder>` markers - cursor will be positioned there on insert
+- Use `Ctrl+S` to save the current query as a template
+- Use `Ctrl+O` to open the templates list
+- Use `Ctrl+G` to edit a template in your `$EDITOR`
 
 ## Building
 
