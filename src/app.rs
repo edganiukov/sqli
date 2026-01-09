@@ -16,8 +16,8 @@ const ACCENT: Color = Color::Rgb(180, 140, 100); // Warm tan
 const BLUE: Color = Color::Rgb(70, 115, 150); // Dim blue
 const SUCCESS: Color = Color::Rgb(130, 160, 110); // Muted green
 const WARNING: Color = Color::Rgb(190, 160, 100); // Muted gold
-const SURFACE: Color = Color::Rgb(30, 30, 35); // Cool dark background
-const SURFACE_LIGHT: Color = Color::Rgb(45, 45, 50); // Cool medium gray
+const SURFACE: Color = Color::Rgb(30, 30, 35); // Cool dark background (focused)
+const SURFACE_LIGHT: Color = Color::Rgb(35, 35, 40); // Slightly lighter (unfocused)
 const TEXT: Color = Color::Rgb(220, 220, 225); // Crisp white text
 const TEXT_DIM: Color = Color::Rgb(120, 120, 125); // Cool dimmed text
 const HIGHLIGHT: Color = Color::Rgb(50, 50, 60); // Cool selection
@@ -105,7 +105,7 @@ impl App {
 
             Paragraph::new(Line::from(vec![
                 Span::styled(
-                    format!(" {}{}{} > ", db_name, ro_suffix, table_name),
+                    format!(" {}{}{} ", db_name, ro_suffix, table_name),
                     Style::default().fg(TEXT),
                 ),
                 Span::styled(status_msg, Style::default().fg(TEXT_DIM)),

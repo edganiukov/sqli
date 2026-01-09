@@ -1,6 +1,6 @@
 # sqli
 
-A terminal-based SQL client with vim-style keybindings. Supports multiple database backends.
+A terminal-based SQL client. Supports multiple database backends.
 
 **NOTE: the project is vibe-coded.**
 
@@ -15,8 +15,7 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 
 - Multi-tab interface.
 - Sidebar with databases and tables.
-- Query editor with vim-style navigation (NORMAL/INSERT modes).
-- Mode indicator in status bar.
+- Query editor with external editor support.
 - Results viewer with scrolling.
 - TOML configuration file with password command support.
 - Query templates with `<placeholder>` support.
@@ -33,32 +32,17 @@ A terminal-based SQL client with vim-style keybindings. Supports multiple databa
 |-----|--------|
 | `:` | Enter command mode |
 | `Tab` | Cycle focus: Sidebar -> Query -> Output |
-| `Shift+Tab` | Cycle focus backwards |
+| `Shift+Tab` / `Esc` | Cycle focus backwards |
 | `F5` / `Ctrl+J` | Execute query |
 
-### Query Editor (NORMAL mode)
+### Query Editor
 | Key | Action |
 |-----|--------|
-| `i` | Enter INSERT mode |
-| `a` | Append (enter INSERT after cursor) |
-| `A` | Append at end of line |
-| `I` | Insert at beginning of line |
-| `o` | Open line below |
-| `O` | Open line above |
-| `h/j/k/l` | Navigate (vim-style) |
-| `w/b` | Word forward/back |
-| `0/$` | Beginning/end of line |
-| `g/G` | Top/bottom of editor |
-| `:` | Enter command mode |
 | `Ctrl+O` | Open templates list |
 | `Ctrl+S` | Save current query as template |
-| `Ctrl+G` | Edit query in external editor |
-
-### Query Editor (INSERT mode)
-| Key | Action |
-|-----|--------|
-| `Esc` | Exit to NORMAL mode |
-| Any key | Insert text |
+| `Ctrl+G` | Edit query in external editor (`$EDITOR`) |
+| `Tab` | Move focus to Output |
+| `Esc` | Move focus to Sidebar |
 
 ### Templates Popup
 | Key | Action |
