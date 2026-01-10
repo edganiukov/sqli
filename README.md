@@ -93,15 +93,15 @@ Templates are saved to `~/.config/sqli/templates.sql` in a simple format:
 
 ```sql
 --- Count Rows [global]
-SELECT COUNT(*) FROM <table>
+SELECT COUNT(*) FROM <table>;
 
 --- Active Users [my-connection]
 SELECT * FROM users
 WHERE active = true
-LIMIT <limit>
+LIMIT <limit>;
 
 --- Find by ID [global]
-SELECT * FROM <table> WHERE id = <id>
+SELECT * FROM <table> WHERE id = <id>;
 ```
 
 - Each template starts with `--- Name [scope]`

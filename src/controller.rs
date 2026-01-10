@@ -1127,8 +1127,8 @@ impl Controller {
         self.query_textarea.cut();
         self.query_textarea.insert_str(&template.query);
 
-        // Position cursor at first <placeholder>
-        if let Some((line, col, _len)) = crate::templates::find_placeholder(&template.query) {
+        // Position cursor at end of first <placeholder>
+        if let Some((line, col, len)) = crate::templates::find_placeholder(&template.query) {
             // Move to start
             self.query_textarea.move_cursor(CursorMove::Top);
             self.query_textarea.move_cursor(CursorMove::Head);
@@ -1138,8 +1138,8 @@ impl Controller {
                 self.query_textarea.move_cursor(CursorMove::Down);
             }
 
-            // Move to target column (at the '<')
-            for _ in 0..col {
+            // Move to end of placeholder (col + len)
+            for _ in 0..(col + len) {
                 self.query_textarea.move_cursor(CursorMove::Forward);
             }
         }
