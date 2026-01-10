@@ -16,9 +16,8 @@ A terminal-based SQL client. Supports multiple database backends.
 - Multi-tab interface.
 - Sidebar with databases and tables.
 - Query editor with external editor support.
-- Results viewer with scrolling.
 - TOML configuration file with password command support.
-- Query templates with `<placeholder>` support.
+- Query templates.
 - External editor integration (`$EDITOR` or vim).
 
 ## Screenshots
@@ -31,9 +30,13 @@ A terminal-based SQL client. Supports multiple database backends.
 | Key | Action |
 |-----|--------|
 | `:` | Enter command mode |
-| `Tab` | Cycle focus: Sidebar -> Query -> Output |
+| `Tab` | Cycle focus forward |
 | `Shift+Tab` / `Esc` | Cycle focus backwards |
-| `F5` / `Ctrl+J` | Execute query |
+| `Ctrl+h` / `Ctrl+Left` | Focus left (to Sidebar) |
+| `Ctrl+l` / `Ctrl+Right` | Focus right (to Query) |
+| `Ctrl+k` / `Ctrl+Up` | Focus up (to Query) |
+| `Ctrl+j` / `Ctrl+Down` | Focus down (to Output) |
+| `F5` | Execute query |
 
 ### Query Editor
 | Key | Action |
@@ -41,8 +44,6 @@ A terminal-based SQL client. Supports multiple database backends.
 | `Ctrl+O` | Open templates list |
 | `Ctrl+S` | Save current query as template |
 | `Ctrl+G` | Edit query in external editor (`$EDITOR`) |
-| `Tab` | Move focus to Output |
-| `Esc` | Move focus to Sidebar |
 
 ### Templates Popup
 | Key | Action |
@@ -136,24 +137,24 @@ password = "cassandra"
 Templates are saved to `~/.config/sqli/templates.sql` in a simple format:
 
 ```sql
-=== Count Rows [global]
+--- Count Rows [global]
 SELECT COUNT(*) FROM <table>
 
-=== Active Users [my-connection]
+--- Active Users [my-connection]
 SELECT * FROM users
 WHERE active = true
 LIMIT <limit>
 
-=== Find by ID [global]
+--- Find by ID [global]
 SELECT * FROM <table> WHERE id = <id>
 ```
 
-- Each template starts with `=== Name [scope]`
+- Each template starts with `--- Name [scope]`
 - Scope is either `global` (all connections) or a connection name
 - Templates can contain `<placeholder>` markers - cursor will be positioned there on insert
 - Use `Ctrl+S` to save the current query as a template
 - Use `Ctrl+O` to open the templates list
-- Use `Ctrl+G` to edit a template in your `$EDITOR`
+- Use `Ctrl+G` to edit a template in your `$EDITOR` (edits name, scope, and query)
 
 ## Building
 

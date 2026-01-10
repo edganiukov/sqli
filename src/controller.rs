@@ -370,9 +370,8 @@ impl Controller {
         match result {
             Ok(client) => {
                 let db_client: DatabaseClient = client;
-                let databases = self
-                    .runtime
-                    .block_on(async { db_client.list_databases(include_system).await });
+                let databases =
+                    self.runtime.block_on(async { db_client.list_databases(include_system).await });
 
                 let tab = self.current_tab_mut();
                 match databases {
@@ -444,11 +443,63 @@ impl Controller {
     }
 
     pub fn handle_database_view_keys(&mut self, key_event: KeyEvent) {
+        // Ctrl+h/j/k/l or Ctrl+arrows for pane navigation (works in all panes)
+        if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+            match key_event.code {
+                KeyCode::Char('h') | KeyCode::Left => {
+                    self.focus_left();
+                    return;
+                }
+                KeyCode::Char('l') | KeyCode::Right => {
+                    self.focus_right();
+                    return;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.focus_up();
+                    return;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.focus_down();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         let focus = self.current_tab().focus;
         match focus {
             Focus::Sidebar => self.handle_sidebar_keys(key_event.code),
             Focus::Query => self.handle_query_keys(key_event),
             Focus::Output => self.handle_output_keys(key_event.code),
+        }
+    }
+
+    fn focus_left(&mut self) {
+        // From Query or Output -> Sidebar
+        let focus = self.current_tab().focus;
+        if focus == Focus::Query || focus == Focus::Output {
+            self.current_tab_mut().focus = Focus::Sidebar;
+        }
+    }
+
+    fn focus_right(&mut self) {
+        // From Sidebar -> Query
+        if self.current_tab().focus == Focus::Sidebar {
+            self.current_tab_mut().focus = Focus::Query;
+        }
+    }
+
+    fn focus_up(&mut self) {
+        // From Output -> Query
+        if self.current_tab().focus == Focus::Output {
+            self.current_tab_mut().focus = Focus::Query;
+        }
+    }
+
+    fn focus_down(&mut self) {
+        // From Query -> Output
+        if self.current_tab().focus == Focus::Query {
+            self.current_tab_mut().focus = Focus::Output;
         }
     }
 
@@ -467,7 +518,7 @@ impl Controller {
             KeyCode::Tab => {
                 self.current_tab_mut().focus = Focus::Query;
             }
-            KeyCode::BackTab => {
+            KeyCode::BackTab | KeyCode::Esc => {
                 self.current_tab_mut().focus = Focus::Output;
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -507,10 +558,7 @@ impl Controller {
                 if is_expanded {
                     self.current_tab_mut().sidebar.expanded.remove(&db_name);
                 } else {
-                    self.current_tab_mut()
-                        .sidebar
-                        .expanded
-                        .insert(db_name.clone());
+                    self.current_tab_mut().sidebar.expanded.insert(db_name.clone());
                     self.load_tables_for_database(&db_name);
                 }
                 self.current_tab_mut().rebuild_sidebar_items();
@@ -573,7 +621,6 @@ impl Controller {
         // Ctrl shortcuts
         if key_event.modifiers.contains(KeyModifiers::CONTROL) {
             match key_event.code {
-                KeyCode::Char('j') => self.execute_query(),
                 KeyCode::Char('o') => self.open_template_popup(),
                 KeyCode::Char('s') => self.open_save_template_popup(),
                 KeyCode::Char('g') => self.edit_query_in_editor(),
@@ -627,7 +674,7 @@ impl Controller {
             KeyCode::Tab => {
                 self.focus_sidebar();
             }
-            KeyCode::BackTab => {
+            KeyCode::BackTab | KeyCode::Esc => {
                 self.current_tab_mut().focus = Focus::Query;
             }
             KeyCode::Char('j') | KeyCode::Down => {
@@ -804,7 +851,8 @@ impl Controller {
     }
 
     fn show_help(&mut self) {
-        let help = ":q quit | F5/Ctrl+J exec | Ctrl+O templates | Ctrl+S save | Ctrl+G edit in $EDITOR";
+        let help =
+            ":q quit | F5 exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor | Ctrl+hjkl nav";
         self.current_tab_mut().status_message = Some(help.to_string());
     }
 
@@ -856,9 +904,7 @@ impl Controller {
                 }
                 // Clear expanded state and tables cache for databases no longer shown
                 tab.sidebar.expanded.retain(|db| tab.databases.contains(db));
-                tab.sidebar
-                    .tables
-                    .retain(|db, _| tab.databases.contains(db));
+                tab.sidebar.tables.retain(|db, _| tab.databases.contains(db));
                 tab.rebuild_sidebar_items();
             }
             Err(e) => {
@@ -868,12 +914,7 @@ impl Controller {
     }
 
     fn is_read_query(query: &str) -> bool {
-        let first_word = query
-            .trim()
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .to_uppercase();
+        let first_word = query.trim().split_whitespace().next().unwrap_or("").to_uppercase();
 
         matches!(
             first_word.as_str(),
@@ -884,12 +925,7 @@ impl Controller {
     // Template management methods
 
     fn open_template_popup(&mut self) {
-        let conn_name = self
-            .current_tab()
-            .connected_db
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("");
+        let conn_name = self.current_tab().connected_db.as_ref().map(|s| s.as_str()).unwrap_or("");
 
         self.template_list_cache = self
             .template_store
@@ -997,12 +1033,10 @@ impl Controller {
             KeyCode::Tab => {
                 // Toggle between global and connection-specific
                 scope = match scope {
-                    TemplateScope::Global => {
-                        match &self.current_tab().connected_db {
-                            Some(conn) => TemplateScope::Connection(conn.clone()),
-                            None => TemplateScope::Global,
-                        }
-                    }
+                    TemplateScope::Global => match &self.current_tab().connected_db {
+                        Some(conn) => TemplateScope::Connection(conn.clone()),
+                        None => TemplateScope::Global,
+                    },
                     TemplateScope::Connection(_) => TemplateScope::Global,
                 };
                 self.popup_state = PopupState::SaveTemplate { name, scope };
@@ -1026,11 +1060,8 @@ impl Controller {
                 if let Some(template) = self.template_list_cache.get(index) {
                     // Find and delete from store
                     let template_name = template.name.clone();
-                    if let Some(store_idx) = self
-                        .template_store
-                        .templates
-                        .iter()
-                        .position(|t| t.name == template_name)
+                    if let Some(store_idx) =
+                        self.template_store.templates.iter().position(|t| t.name == template_name)
                     {
                         self.template_store.delete_template(store_idx);
                         let _ = self.template_store.save();
@@ -1107,7 +1138,8 @@ impl Controller {
                 self.query_textarea.select_all();
                 self.query_textarea.cut();
                 self.query_textarea.insert_str(&edited.trim_end());
-                self.current_tab_mut().status_message = Some("Query updated from editor".to_string());
+                self.current_tab_mut().status_message =
+                    Some("Query updated from editor".to_string());
             }
             Err(e) => {
                 self.current_tab_mut().status_message = Some(format!("Editor error: {}", e));
@@ -1122,25 +1154,31 @@ impl Controller {
             None => return,
         };
 
-        match crate::editor::edit_in_external_editor(&template.query, "sql") {
-            Ok(edited) => {
-                let edited_query = edited.trim_end().to_string();
+        // Serialize full template (name, scope, query) for editing
+        let content = TemplateStore::serialize_one(&template);
 
-                // Find and update the template in the store
-                if let Some(store_template) = self
-                    .template_store
-                    .templates
-                    .iter_mut()
-                    .find(|t| t.name == template.name)
-                {
-                    store_template.query = edited_query;
-                    if let Err(e) = self.template_store.save() {
-                        self.current_tab_mut().status_message =
-                            Some(format!("Failed to save template: {}", e));
-                    } else {
-                        self.current_tab_mut().status_message =
-                            Some(format!("Updated template '{}'", template.name));
+        match crate::editor::edit_in_external_editor(&content, "sql") {
+            Ok(edited) => {
+                // Parse the edited content back
+                if let Some(new_template) = TemplateStore::parse_one(&edited) {
+                    // Find and update the template in the store
+                    if let Some(store_template) =
+                        self.template_store.templates.iter_mut().find(|t| t.name == template.name)
+                    {
+                        store_template.name = new_template.name.clone();
+                        store_template.scope = new_template.scope;
+                        store_template.query = new_template.query;
+                        if let Err(e) = self.template_store.save() {
+                            self.current_tab_mut().status_message =
+                                Some(format!("Failed to save template: {}", e));
+                        } else {
+                            self.current_tab_mut().status_message =
+                                Some(format!("Updated template '{}'", new_template.name));
+                        }
                     }
+                } else {
+                    self.current_tab_mut().status_message =
+                        Some("Invalid template format".to_string());
                 }
 
                 // Refresh the cache

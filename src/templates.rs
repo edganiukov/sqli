@@ -84,11 +84,11 @@ impl TemplateStore {
     }
 
     /// Parse templates from the simple delimiter format:
-    /// === Template Name [scope]
+    /// --- Template Name [scope]
     /// query content here
     /// can be multiline
     ///
-    /// === Another Template [global]
+    /// --- Another Template [global]
     /// SELECT * FROM table
     fn parse(content: &str) -> Vec<Template> {
         let mut templates = Vec::new();
@@ -97,7 +97,7 @@ impl TemplateStore {
         let mut current_query = String::new();
 
         for line in content.lines() {
-            if line.starts_with("=== ") {
+            if line.starts_with("--- ") {
                 // Save previous template if exists
                 if let (Some(name), Some(scope)) = (current_name.take(), current_scope.take()) {
                     let query = current_query.trim().to_string();
@@ -107,8 +107,8 @@ impl TemplateStore {
                     current_query.clear();
                 }
 
-                // Parse new template header: "=== Name [scope]"
-                let header = &line[4..]; // Skip "=== "
+                // Parse new template header: "--- Name [scope]"
+                let header = &line[4..]; // Skip "--- "
                 if let Some((name, scope)) = Self::parse_header(header) {
                     current_name = Some(name);
                     current_scope = Some(scope);
@@ -155,20 +155,21 @@ impl TemplateStore {
 
     /// Serialize templates to the simple delimiter format
     fn serialize(templates: &[Template]) -> String {
-        let mut output = String::new();
+        templates.iter().map(Self::serialize_one).collect()
+    }
 
-        for template in templates {
-            let scope_str = match &template.scope {
-                TemplateScope::Global => "global".to_string(),
-                TemplateScope::Connection(name) => name.clone(),
-            };
+    /// Serialize a single template to the delimiter format
+    pub fn serialize_one(template: &Template) -> String {
+        let scope_str = match &template.scope {
+            TemplateScope::Global => "global".to_string(),
+            TemplateScope::Connection(name) => name.clone(),
+        };
+        format!("--- {} [{}]\n{}\n", template.name, scope_str, template.query)
+    }
 
-            output.push_str(&format!("=== {} [{}]\n", template.name, scope_str));
-            output.push_str(&template.query);
-            output.push_str("\n\n");
-        }
-
-        output
+    /// Parse a single template from content (used for editing)
+    pub fn parse_one(content: &str) -> Option<Template> {
+        Self::parse(content).into_iter().next()
     }
 }
 
@@ -191,10 +192,10 @@ mod tests {
 
     #[test]
     fn test_parse_templates() {
-        let content = r#"=== Count Rows [global]
+        let content = r#"--- Count Rows [global]
 SELECT COUNT(*) FROM <table>
 
-=== Active Users [my-db]
+--- Active Users [my-db]
 SELECT * FROM users
 WHERE active = true
 LIMIT <limit>
@@ -231,8 +232,8 @@ LIMIT <limit>
         ];
 
         let output = TemplateStore::serialize(&templates);
-        assert!(output.contains("=== Test [global]"));
-        assert!(output.contains("=== Local [db]"));
+        assert!(output.contains("--- Test [global]"));
+        assert!(output.contains("--- Local [db]"));
     }
 
     #[test]

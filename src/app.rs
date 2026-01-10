@@ -434,11 +434,6 @@ impl App {
                 let msg = Paragraph::new(Line::from(vec![
                     Span::styled("Press ", Style::default().fg(TEXT_DIM)),
                     Span::styled("F5", Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
-                    Span::styled(" or ", Style::default().fg(TEXT_DIM)),
-                    Span::styled(
-                        "Ctrl+J",
-                        Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
-                    ),
                     Span::styled(" to execute query", Style::default().fg(TEXT_DIM)),
                 ]))
                 .style(Style::default().bg(bg_color));
