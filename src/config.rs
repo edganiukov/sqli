@@ -70,10 +70,10 @@ fn run_password_command(cmd: &str) -> io::Result<String> {
     };
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("Command failed with status: {}", output.status),
-        ));
+        return Err(io::Error::other(format!(
+            "Command failed with status: {}",
+            output.status
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())

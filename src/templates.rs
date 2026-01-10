@@ -97,7 +97,7 @@ impl TemplateStore {
         let mut current_query = String::new();
 
         for line in content.lines() {
-            if line.starts_with("--- ") {
+            if let Some(header) = line.strip_prefix("--- ") {
                 // Save previous template if exists
                 if let (Some(name), Some(scope)) = (current_name.take(), current_scope.take()) {
                     let query = current_query.trim().to_string();
@@ -108,7 +108,6 @@ impl TemplateStore {
                 }
 
                 // Parse new template header: "--- Name [scope]"
-                let header = &line[4..]; // Skip "--- "
                 if let Some((name, scope)) = Self::parse_header(header) {
                     current_name = Some(name);
                     current_scope = Some(scope);
@@ -136,19 +135,17 @@ impl TemplateStore {
     /// Parse header line: "Template Name [scope]" -> (name, scope)
     fn parse_header(header: &str) -> Option<(String, TemplateScope)> {
         let header = header.trim();
-        if let Some(bracket_start) = header.rfind('[') {
-            if let Some(bracket_end) = header.rfind(']') {
-                if bracket_end > bracket_start {
-                    let name = header[..bracket_start].trim().to_string();
-                    let scope_str = &header[bracket_start + 1..bracket_end];
-                    let scope = if scope_str.eq_ignore_ascii_case("global") {
-                        TemplateScope::Global
-                    } else {
-                        TemplateScope::Connection(scope_str.to_string())
-                    };
-                    return Some((name, scope));
-                }
-            }
+        let bracket_start = header.rfind('[')?;
+        let bracket_end = header.rfind(']')?;
+        if bracket_end > bracket_start {
+            let name = header[..bracket_start].trim().to_string();
+            let scope_str = &header[bracket_start + 1..bracket_end];
+            let scope = if scope_str.eq_ignore_ascii_case("global") {
+                TemplateScope::Global
+            } else {
+                TemplateScope::Connection(scope_str.to_string())
+            };
+            return Some((name, scope));
         }
         None
     }
@@ -164,7 +161,10 @@ impl TemplateStore {
             TemplateScope::Global => "global".to_string(),
             TemplateScope::Connection(name) => name.clone(),
         };
-        format!("--- {} [{}]\n{}\n", template.name, scope_str, template.query)
+        format!(
+            "--- {} [{}]\n{}\n",
+            template.name, scope_str, template.query
+        )
     }
 
     /// Parse a single template from content (used for editing)
@@ -176,11 +176,11 @@ impl TemplateStore {
 /// Find the first <placeholder> in a query and return (line, col, length)
 pub fn find_placeholder(query: &str) -> Option<(usize, usize, usize)> {
     for (line_idx, line) in query.lines().enumerate() {
-        if let Some(start) = line.find('<') {
-            if let Some(end_offset) = line[start..].find('>') {
-                // Length includes < and >
-                return Some((line_idx, start, end_offset + 1));
-            }
+        if let Some(start) = line.find('<')
+            && let Some(end_offset) = line[start..].find('>')
+        {
+            // Length includes < and >
+            return Some((line_idx, start, end_offset + 1));
         }
     }
     None

@@ -1,9 +1,9 @@
 use crate::db::QueryResult;
+use crate::error::Result;
 use chrono::{DateTime, NaiveDate, Utc};
 use scylla::frame::response::result::CqlValue;
 use scylla::frame::value::{CqlDate, CqlDecimal, CqlTime, CqlTimestamp};
 use scylla::{Session, SessionBuilder};
-use std::error::Error;
 use std::sync::Arc;
 
 pub struct CassandraClient {
@@ -17,7 +17,7 @@ impl CassandraClient {
         user: &str,
         password: &str,
         keyspace: &str,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Self> {
         let addr = format!("{}:{}", host, port);
 
         let mut builder = SessionBuilder::new().known_node(&addr);
@@ -40,11 +40,7 @@ impl CassandraClient {
         })
     }
 
-    /// List all keyspaces (equivalent to databases in PostgreSQL)
-    pub async fn list_databases(
-        &self,
-        include_system: bool,
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         let rows = self
             .session
             .query_unpaged("SELECT keyspace_name FROM system_schema.keyspaces", &[])
@@ -65,11 +61,10 @@ impl CassandraClient {
         if let Some(rows) = rows.rows {
             for row in rows {
                 if let Some(CqlValue::Text(s) | CqlValue::Ascii(s)) =
-                    row.columns.get(0).and_then(|v| v.as_ref())
+                    row.columns.first().and_then(|v| v.as_ref())
+                    && (include_system || !SYSTEM_KEYSPACES.contains(&s.as_str()))
                 {
-                    if include_system || !SYSTEM_KEYSPACES.contains(&s.as_str()) {
-                        keyspaces.push(s.clone());
-                    }
+                    keyspaces.push(s.clone());
                 }
             }
         }
@@ -77,11 +72,7 @@ impl CassandraClient {
         Ok(keyspaces)
     }
 
-    /// List tables in a keyspace
-    pub async fn list_tables(
-        &self,
-        keyspace: &str,
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    pub async fn list_tables(&self, keyspace: &str) -> Result<Vec<String>> {
         let rows = self
             .session
             .query_unpaged(
@@ -93,17 +84,13 @@ impl CassandraClient {
         let mut tables = Vec::new();
         if let Some(rows) = rows.rows {
             for row in rows {
-                // Check if keyspace matches
                 if let Some(CqlValue::Text(ks) | CqlValue::Ascii(ks)) =
-                    row.columns.get(0).and_then(|v| v.as_ref())
+                    row.columns.first().and_then(|v| v.as_ref())
+                    && ks == keyspace
+                    && let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) =
+                        row.columns.get(1).and_then(|v| v.as_ref())
                 {
-                    if ks == keyspace {
-                        if let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) =
-                            row.columns.get(1).and_then(|v| v.as_ref())
-                        {
-                            tables.push(t.clone());
-                        }
-                    }
+                    tables.push(t.clone());
                 }
             }
         }
@@ -111,10 +98,7 @@ impl CassandraClient {
         Ok(tables)
     }
 
-    pub async fn execute_query(
-        &self,
-        query: &str,
-    ) -> Result<QueryResult, Box<dyn Error + Send + Sync>> {
+    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
         let query_upper = query.trim().to_uppercase();
 
         if query_upper.starts_with("SELECT") {
@@ -129,11 +113,8 @@ impl CassandraClient {
             let mut data_rows: Vec<Vec<String>> = Vec::new();
             if let Some(rows) = result.rows {
                 for row in rows {
-                    let row_data: Vec<String> = row
-                        .columns
-                        .iter()
-                        .map(|col| Self::format_column_value(col))
-                        .collect();
+                    let row_data: Vec<String> =
+                        row.columns.iter().map(Self::format_column_value).collect();
                     data_rows.push(row_data);
                 }
             }
@@ -143,9 +124,29 @@ impl CassandraClient {
                 rows: data_rows,
             })
         } else {
-            // For non-SELECT queries, execute and report success
             self.session.query_unpaged(query, &[]).await?;
             Ok(QueryResult::Execute { rows_affected: 0 })
+        }
+    }
+
+    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
+        format!("SELECT * FROM {} LIMIT {};", table, limit)
+    }
+
+    pub fn describe_table_query(&self, table: &str, keyspace: Option<&str>) -> String {
+        match keyspace {
+            Some(ks) => format!(
+                "SELECT column_name, type, kind \n\
+                 FROM system_schema.columns \n\
+                 WHERE keyspace_name = '{}' AND table_name = '{}';",
+                ks, table
+            ),
+            None => format!(
+                "SELECT column_name, type, kind \n\
+                 FROM system_schema.columns \n\
+                 WHERE table_name = '{}';",
+                table
+            ),
         }
     }
 
@@ -179,7 +180,6 @@ impl CassandraClient {
     }
 
     fn format_timestamp(t: &CqlTimestamp) -> String {
-        // CqlTimestamp contains milliseconds since Unix epoch
         let millis = t.0;
         let secs = millis / 1000;
         let nsecs = ((millis % 1000) * 1_000_000) as u32;
@@ -190,8 +190,7 @@ impl CassandraClient {
     }
 
     fn format_date(d: &CqlDate) -> String {
-        // CqlDate is days since Unix epoch (1970-01-01)
-        let days = d.0 as i64 - (1 << 31); // CqlDate uses unsigned with offset
+        let days = d.0 as i64 - (1 << 31);
         match NaiveDate::from_num_days_from_ce_opt(days as i32 + 719163) {
             Some(date) => date.format("%Y-%m-%d").to_string(),
             None => format!("{}", d.0),
@@ -199,7 +198,6 @@ impl CassandraClient {
     }
 
     fn format_time(t: &CqlTime) -> String {
-        // CqlTime is nanoseconds since midnight
         let nanos = t.0;
         let secs = nanos / 1_000_000_000;
         let hours = secs / 3600;
@@ -240,33 +238,5 @@ impl CassandraClient {
                 format!("{}.{}", int_part, frac_part)
             }
         }
-    }
-
-    /// Generate a SELECT query for previewing table contents
-    pub fn select_table_query(table: &str, limit: usize) -> String {
-        format!("SELECT * FROM {} LIMIT {};", table, limit)
-    }
-
-    /// Generate a query to describe table structure
-    pub fn describe_table_query(table: &str, keyspace: Option<&str>) -> String {
-        match keyspace {
-            Some(ks) => format!(
-                "SELECT column_name, type, kind \n\
-                 FROM system_schema.columns \n\
-                 WHERE keyspace_name = '{}' AND table_name = '{}';",
-                ks, table
-            ),
-            None => format!(
-                "SELECT column_name, type, kind \n\
-                 FROM system_schema.columns \n\
-                 WHERE table_name = '{}';",
-                table
-            ),
-        }
-    }
-
-    /// Default keyspace to connect to when none is selected (empty = no keyspace)
-    pub fn default_database() -> &'static str {
-        ""
     }
 }

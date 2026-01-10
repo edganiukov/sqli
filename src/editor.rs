@@ -1,5 +1,7 @@
 use crossterm::ExecutableCommand;
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -12,7 +14,11 @@ pub fn edit_in_external_editor(content: &str, file_extension: &str) -> io::Resul
 
     // Create temp file with the content
     let temp_dir = env::temp_dir();
-    let temp_file = temp_dir.join(format!("sqli_edit_{}.{}", std::process::id(), file_extension));
+    let temp_file = temp_dir.join(format!(
+        "sqli_edit_{}.{}",
+        std::process::id(),
+        file_extension
+    ));
 
     fs::write(&temp_file, content)?;
 
@@ -21,9 +27,7 @@ pub fn edit_in_external_editor(content: &str, file_extension: &str) -> io::Resul
     io::stdout().execute(LeaveAlternateScreen)?;
 
     // Run the editor
-    let status = Command::new(&editor)
-        .arg(&temp_file)
-        .status();
+    let status = Command::new(&editor).arg(&temp_file).status();
 
     // Restore TUI mode
     enable_raw_mode()?;
@@ -41,11 +45,14 @@ pub fn edit_in_external_editor(content: &str, file_extension: &str) -> io::Resul
         }
         Ok(_) => {
             fs::remove_file(&temp_file).ok();
-            Err(io::Error::new(io::ErrorKind::Other, "Editor exited with error"))
+            Err(io::Error::other("Editor exited with error"))
         }
         Err(e) => {
             fs::remove_file(&temp_file).ok();
-            Err(io::Error::new(io::ErrorKind::Other, format!("Failed to run editor '{}': {}", editor, e)))
+            Err(io::Error::other(format!(
+                "Failed to run editor '{}': {}",
+                editor, e
+            )))
         }
     }
 }

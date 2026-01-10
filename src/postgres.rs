@@ -1,8 +1,9 @@
 use crate::db::QueryResult;
+use crate::error::Result;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde_json::Value as JsonValue;
 use tokio_postgres::types::Type;
-use tokio_postgres::{Client, Error, NoTls, Row};
+use tokio_postgres::{Client, NoTls, Row};
 
 pub struct PostgresClient {
     client: Client,
@@ -15,7 +16,7 @@ impl PostgresClient {
         user: &str,
         password: &str,
         database: &str,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         let conn_string = format!(
             "host={} port={} user={} password={} dbname={}",
             host, port, user, password, database
@@ -32,7 +33,7 @@ impl PostgresClient {
         Ok(Self { client })
     }
 
-    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>, Error> {
+    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         const SYSTEM_DATABASES: &[&str] = &["postgres", "template0", "template1"];
 
         let rows = self
@@ -49,7 +50,7 @@ impl PostgresClient {
         Ok(databases)
     }
 
-    pub async fn list_tables(&self, schema: &str) -> Result<Vec<String>, Error> {
+    pub async fn list_tables(&self, schema: &str) -> Result<Vec<String>> {
         let rows = self
             .client
             .query(
@@ -61,7 +62,7 @@ impl PostgresClient {
         Ok(rows.iter().map(|row| row.get(0)).collect())
     }
 
-    pub async fn execute_query(&self, query: &str) -> Result<QueryResult, Error> {
+    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
         let query_upper = query.trim().to_uppercase();
 
         if query_upper.starts_with("SELECT") || query_upper.starts_with("WITH") {
@@ -99,18 +100,11 @@ impl PostgresClient {
         }
     }
 
-    /// Generate a SELECT query for previewing table contents
-    pub fn select_table_query(table: &str, limit: usize) -> String {
+    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
         format!("SELECT * FROM {} LIMIT {};", table, limit)
     }
 
-    /// Default database to connect to when none is selected
-    pub fn default_database() -> &'static str {
-        "postgres"
-    }
-
-    /// Generate a query to describe table structure (like \d+ in psql)
-    pub fn describe_table_query(table: &str) -> String {
+    pub fn describe_table_query(&self, table: &str, _schema: Option<&str>) -> String {
         format!(
             "SELECT column_name, data_type, is_nullable, column_default \n\
              FROM information_schema.columns \n\
@@ -123,8 +117,7 @@ impl PostgresClient {
     fn get_column_value(row: &Row, idx: usize) -> String {
         let col_type = row.columns()[idx].type_();
 
-        // Try to get value based on known types
-        let result: Result<String, _> = match *col_type {
+        let result: std::result::Result<String, _> = match *col_type {
             Type::BOOL => row.try_get::<_, Option<bool>>(idx).map(|v| {
                 v.map(|b| b.to_string())
                     .unwrap_or_else(|| "NULL".to_string())

@@ -1,7 +1,7 @@
 use crate::db::QueryResult;
+use crate::error::{Result, SqliError};
 use reqwest::Client;
 use serde::Deserialize;
-use std::error::Error;
 
 pub struct ClickHouseClient {
     client: Client,
@@ -30,7 +30,7 @@ impl ClickHouseClient {
         password: &str,
         database: &str,
         tls: bool,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Self> {
         let client = Client::new();
         let scheme = if tls { "https" } else { "http" };
         let base_url = format!("{}://{}:{}", scheme, host, port);
@@ -49,7 +49,7 @@ impl ClickHouseClient {
         Ok(ch_client)
     }
 
-    async fn execute_raw(&self, query: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+    async fn execute_raw(&self, query: &str) -> Result<String> {
         let mut request = self
             .client
             .post(&self.base_url)
@@ -67,16 +67,13 @@ impl ClickHouseClient {
 
         if !response.status().is_success() {
             let error_text = response.text().await?;
-            return Err(error_text.into());
+            return Err(SqliError::Query(error_text));
         }
 
         Ok(response.text().await?)
     }
 
-    pub async fn list_databases(
-        &self,
-        include_system: bool,
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         const SYSTEM_DATABASES: &[&str] = &["system", "INFORMATION_SCHEMA", "information_schema"];
 
         let query = "SELECT name FROM system.databases ORDER BY name FORMAT JSONEachRow";
@@ -96,10 +93,7 @@ impl ClickHouseClient {
         Ok(databases)
     }
 
-    pub async fn list_tables(
-        &self,
-        database: &str,
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         let query = format!(
             "SELECT name FROM system.tables WHERE database = '{}' ORDER BY name FORMAT JSONEachRow",
             database.replace('\'', "''")
@@ -119,10 +113,7 @@ impl ClickHouseClient {
         Ok(tables)
     }
 
-    pub async fn execute_query(
-        &self,
-        query: &str,
-    ) -> Result<QueryResult, Box<dyn Error + Send + Sync>> {
+    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
         let query_upper = query.trim().to_uppercase();
 
         if query_upper.starts_with("SELECT")
@@ -130,12 +121,10 @@ impl ClickHouseClient {
             || query_upper.starts_with("DESCRIBE")
             || query_upper.starts_with("EXPLAIN")
         {
-            // Add FORMAT JSON to get structured results
             let query_with_format = format!("{} FORMAT JSON", query.trim().trim_end_matches(';'));
 
             let response = self.execute_raw(&query_with_format).await?;
 
-            // Parse JSON response
             let json_response: JsonResponse = serde_json::from_str(&response)?;
 
             let columns: Vec<String> = json_response.meta.into_iter().map(|m| m.name).collect();
@@ -148,7 +137,7 @@ impl ClickHouseClient {
                         .iter()
                         .map(|col| {
                             row.get(col)
-                                .map(|v| Self::format_value(v))
+                                .map(Self::format_value)
                                 .unwrap_or_else(|| "NULL".to_string())
                         })
                         .collect()
@@ -157,9 +146,19 @@ impl ClickHouseClient {
 
             Ok(QueryResult::Select { columns, rows })
         } else {
-            // For non-SELECT queries
             self.execute_raw(query).await?;
             Ok(QueryResult::Execute { rows_affected: 0 })
+        }
+    }
+
+    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
+        format!("SELECT * FROM {} LIMIT {}", table, limit)
+    }
+
+    pub fn describe_table_query(&self, table: &str, database: Option<&str>) -> String {
+        match database {
+            Some(db) => format!("DESCRIBE TABLE {}.{}", db, table),
+            None => format!("DESCRIBE TABLE {}", table),
         }
     }
 
@@ -172,20 +171,5 @@ impl ClickHouseClient {
             serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
             serde_json::Value::Object(obj) => format!("{{{} fields}}", obj.len()),
         }
-    }
-
-    pub fn select_table_query(table: &str, limit: usize) -> String {
-        format!("SELECT * FROM {} LIMIT {}", table, limit)
-    }
-
-    pub fn describe_table_query(table: &str, database: Option<&str>) -> String {
-        match database {
-            Some(db) => format!("DESCRIBE TABLE {}.{}", db, table),
-            None => format!("DESCRIBE TABLE {}", table),
-        }
-    }
-
-    pub fn default_database() -> &'static str {
-        "default"
     }
 }

@@ -22,6 +22,76 @@ const TEXT: Color = Color::Rgb(220, 220, 225); // Crisp white text
 const TEXT_DIM: Color = Color::Rgb(120, 120, 125); // Cool dimmed text
 const HIGHLIGHT: Color = Color::Rgb(50, 50, 60); // Cool selection
 
+// UI Helper: Create a styled panel block with title
+fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_> {
+    let border_color = if is_focused { BLUE } else { TEXT_DIM };
+    let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
+
+    Block::default()
+        .title(Line::from(vec![
+            Span::styled("── ", Style::default().fg(border_color)),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(border_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ──", Style::default().fg(border_color)),
+        ]))
+        .borders(borders)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(bg_color))
+}
+
+// UI Helper: Create a popup dialog block
+fn popup_block(title: &str, border_color: Color) -> Block<'_> {
+    Block::default()
+        .title(format!(" {} ", title))
+        .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(SURFACE))
+}
+
+// UI Helper: Calculate centered popup area
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let popup_width = width.min(area.width);
+    let popup_height = height.min(area.height);
+    Rect {
+        x: (area.width.saturating_sub(popup_width)) / 2,
+        y: (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    }
+}
+
+// UI Helper: Calculate centered popup area with percentage
+fn centered_rect_pct(area: Rect, width_pct: f32, height_pct: f32, min_w: u16, min_h: u16) -> Rect {
+    let popup_width = ((area.width as f32 * width_pct) as u16)
+        .max(min_w)
+        .min(area.width);
+    let popup_height = ((area.height as f32 * height_pct) as u16)
+        .max(min_h)
+        .min(area.height);
+    Rect {
+        x: (area.width.saturating_sub(popup_width)) / 2,
+        y: (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    }
+}
+
+// UI Helper: Get colors based on focus state
+fn focus_colors(is_focused: bool) -> (Color, Color) {
+    if is_focused {
+        (BLUE, SURFACE)
+    } else {
+        (TEXT_DIM, SURFACE_LIGHT)
+    }
+}
+
 pub struct App {
     controller: Controller,
 }
@@ -87,7 +157,7 @@ impl App {
             let db_name = tab
                 .current_database
                 .as_ref()
-                .map(|db| format!("{}", db))
+                .map(|db| db.to_string())
                 .unwrap_or_else(|| "(none)".to_string());
 
             let table_name = tab
@@ -139,7 +209,10 @@ impl App {
         for (i, tab) in self.controller.tabs.iter().enumerate() {
             let tab_name = format!(" {} ", tab.name);
             let style = if i == self.controller.current_tab {
-                Style::default().fg(SURFACE).bg(BLUE).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(SURFACE)
+                    .bg(BLUE)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT_DIM).bg(SURFACE_LIGHT)
             };
@@ -256,7 +329,6 @@ impl App {
                         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                     ),
                     SidebarItem::Table { table, .. } => {
-                        // Check if next item is a database or end (this table is last in group)
                         let is_last = tab
                             .sidebar
                             .items
@@ -274,27 +346,14 @@ impl App {
             })
             .collect();
 
-        let border_color = if is_focused { BLUE } else { TEXT_DIM };
-        let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
-
-        let block = Block::default()
-            .title(Line::from(vec![
-                Span::styled("── ", Style::default().fg(border_color)),
-                Span::styled(
-                    "Explorer",
-                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" ──", Style::default().fg(border_color)),
-            ]))
-            .borders(Borders::RIGHT)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(bg_color));
+        let block = panel_block("Explorer", is_focused, Borders::RIGHT);
 
         let list = List::new(items)
             .block(block)
             .highlight_style(
-                Style::default().bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT }).fg(TEXT),
+                Style::default()
+                    .bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT })
+                    .fg(TEXT),
             )
             .highlight_symbol(if is_focused { "> " } else { "  " });
 
@@ -307,53 +366,36 @@ impl App {
     fn draw_query_input(&mut self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Query;
+        let (_, bg_color) = focus_colors(is_focused);
 
-        let border_color = if is_focused { BLUE } else { TEXT_DIM };
-        let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
+        let block = panel_block("Query", is_focused, Borders::BOTTOM);
 
-        let block = Block::default()
-            .title(Line::from(vec![
-                Span::styled("── ", Style::default().fg(border_color)),
-                Span::styled(
-                    "Query",
-                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" ──", Style::default().fg(border_color)),
-            ]))
-            .borders(Borders::BOTTOM)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(bg_color));
-
-        self.controller.query_textarea.set_style(Style::default().bg(bg_color).fg(TEXT));
-        self.controller.query_textarea.set_cursor_style(Style::default().bg(if is_focused {
-            Color::White
-        } else {
-            TEXT_DIM
-        }));
-        self.controller.query_textarea.set_cursor_line_style(Style::default());
+        self.controller
+            .query_textarea
+            .set_style(Style::default().bg(bg_color).fg(TEXT));
+        self.controller
+            .query_textarea
+            .set_cursor_style(Style::default().bg(if is_focused {
+                Color::White
+            } else {
+                TEXT_DIM
+            }));
+        self.controller
+            .query_textarea
+            .set_cursor_line_style(Style::default());
         self.controller.query_textarea.set_block(block);
-        self.controller.query_textarea.set_line_number_style(Style::default().fg(TEXT_DIM));
+        self.controller
+            .query_textarea
+            .set_line_number_style(Style::default().fg(TEXT_DIM));
         frame.render_widget(&self.controller.query_textarea, area);
     }
 
     fn draw_query_output(&self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Output;
-        let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
+        let (_, bg_color) = focus_colors(is_focused);
 
-        let border_color = if is_focused { BLUE } else { TEXT_DIM };
-
-        let block = Block::default()
-            .title(Line::from(vec![
-                Span::styled("── ", Style::default().fg(border_color)),
-                Span::styled(
-                    "Results",
-                    Style::default().fg(border_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" ──", Style::default().fg(border_color)),
-            ]))
-            .style(Style::default().bg(bg_color));
+        let block = panel_block("Results", is_focused, Borders::NONE);
 
         let inner_area = block.inner(area);
         frame.render_widget(block, area);
@@ -392,31 +434,36 @@ impl App {
                         Cell::from(h.as_str())
                             .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
-                    let header =
-                        Row::new(header_cells).height(1).style(Style::default().bg(SURFACE_LIGHT));
+                    let header = Row::new(header_cells)
+                        .height(1)
+                        .style(Style::default().bg(SURFACE_LIGHT));
 
                     // Calculate visible rows based on scroll position
                     let visible_height = inner_area.height.saturating_sub(1) as usize; // -1 for header
                     let scroll = tab.result_scroll;
                     let cursor = tab.result_cursor;
 
-                    let visible_rows =
-                        rows.iter().enumerate().skip(scroll).take(visible_height).map(
-                            |(idx, row)| {
-                                let cells = row.iter().map(|c| {
-                                    Cell::from(c.as_str()).style(Style::default().fg(TEXT))
-                                });
-                                let row = Row::new(cells).height(1);
-                                if idx == cursor && is_focused {
-                                    row.style(Style::default().bg(HIGHLIGHT))
-                                } else {
-                                    row.style(Style::default().bg(bg_color))
-                                }
-                            },
-                        );
+                    let visible_rows = rows
+                        .iter()
+                        .enumerate()
+                        .skip(scroll)
+                        .take(visible_height)
+                        .map(|(idx, row)| {
+                            let cells = row
+                                .iter()
+                                .map(|c| Cell::from(c.as_str()).style(Style::default().fg(TEXT)));
+                            let row = Row::new(cells).height(1);
+                            if idx == cursor && is_focused {
+                                row.style(Style::default().bg(HIGHLIGHT))
+                            } else {
+                                row.style(Style::default().bg(bg_color))
+                            }
+                        });
 
-                    let widths: Vec<Constraint> =
-                        col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
+                    let widths: Vec<Constraint> = col_widths
+                        .iter()
+                        .map(|&w| Constraint::Length(w as u16))
+                        .collect();
 
                     let table = Table::new(visible_rows, widths)
                         .header(header)
@@ -461,23 +508,9 @@ impl App {
         let area = frame.area();
         let templates = &self.controller.template_list_cache;
 
-        // Calculate centered popup area (60% width, 70% height)
-        let popup_width = ((area.width as f32 * 0.6) as u16).max(40).min(area.width);
-        let popup_height = ((area.height as f32 * 0.7) as u16).max(10).min(area.height);
-        let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-        let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-
-        let popup_area = Rect {
-            x: popup_x,
-            y: popup_y,
-            width: popup_width,
-            height: popup_height,
-        };
-
-        // Clear background
+        let popup_area = centered_rect_pct(area, 0.6, 0.7, 40, 10);
         frame.render_widget(Clear, popup_area);
 
-        // Build list items with preview
         let items: Vec<ListItem> = templates
             .iter()
             .map(|t| {
@@ -485,8 +518,14 @@ impl App {
                     TemplateScope::Global => "[global]".to_string(),
                     TemplateScope::Connection(name) => format!("[{}]", name),
                 };
-                let preview: String =
-                    t.query.lines().next().unwrap_or("").chars().take(40).collect();
+                let preview: String = t
+                    .query
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(40)
+                    .collect();
 
                 ListItem::new(vec![
                     Line::from(vec![
@@ -505,13 +544,7 @@ impl App {
             })
             .collect();
 
-        let block = Block::default()
-            .title(" Templates (Ctrl+G edit, Ctrl+D delete) ")
-            .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(BLUE))
-            .style(Style::default().bg(SURFACE));
+        let block = popup_block("Templates (Ctrl+G edit, Ctrl+D delete)", BLUE);
 
         let list = List::new(items)
             .block(block)
@@ -526,30 +559,10 @@ impl App {
 
     fn draw_save_template_popup(&self, frame: &mut Frame, name: &str, scope: &TemplateScope) {
         let area = frame.area();
-
-        let popup_width = 50_u16.min(area.width);
-        let popup_height = 9_u16.min(area.height);
-        let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-        let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-
-        let popup_area = Rect {
-            x: popup_x,
-            y: popup_y,
-            width: popup_width,
-            height: popup_height,
-        };
-
-        // Clear background
+        let popup_area = centered_rect(area, 50, 9);
         frame.render_widget(Clear, popup_area);
 
-        let block = Block::default()
-            .title(" Save Template ")
-            .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(BLUE))
-            .style(Style::default().bg(SURFACE));
-
+        let block = popup_block("Save Template", BLUE);
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
 
@@ -570,7 +583,6 @@ impl App {
             chunks[0],
         );
 
-        // Input field with cursor
         let input_display = format!("{}_", name);
         frame.render_widget(
             Paragraph::new(input_display).style(Style::default().fg(TEXT).bg(SURFACE_LIGHT)),
@@ -595,30 +607,10 @@ impl App {
 
     fn draw_confirm_delete_popup(&self, frame: &mut Frame, template_name: &str) {
         let area = frame.area();
-
-        let popup_width = 40_u16.min(area.width);
-        let popup_height = 5_u16.min(area.height);
-        let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-        let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-
-        let popup_area = Rect {
-            x: popup_x,
-            y: popup_y,
-            width: popup_width,
-            height: popup_height,
-        };
-
-        // Clear background
+        let popup_area = centered_rect(area, 40, 5);
         frame.render_widget(Clear, popup_area);
 
-        let block = Block::default()
-            .title(" Confirm Delete ")
-            .title_style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(WARNING))
-            .style(Style::default().bg(SURFACE));
-
+        let block = popup_block("Confirm Delete", WARNING);
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
 

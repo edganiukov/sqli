@@ -5,6 +5,7 @@ mod config;
 mod controller;
 mod db;
 mod editor;
+mod error;
 mod mysql;
 mod postgres;
 mod templates;
@@ -67,10 +68,10 @@ fn run(
 
         terminal.draw(|frame| app.draw(frame))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                app.handle_key(key);
-            }
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            app.handle_key(key);
         }
 
         if app.quit() {

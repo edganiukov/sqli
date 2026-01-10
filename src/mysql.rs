@@ -1,7 +1,7 @@
 use crate::db::QueryResult;
+use crate::error::{Result, SqliError};
 use mysql_async::prelude::*;
 use mysql_async::{Opts, OptsBuilder, Pool, Value};
-use std::error::Error;
 
 pub struct MySqlClient {
     pool: Pool,
@@ -14,7 +14,7 @@ impl MySqlClient {
         user: &str,
         password: &str,
         database: &str,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Self> {
         let opts = OptsBuilder::default()
             .ip_or_hostname(host)
             .tcp_port(port)
@@ -35,10 +35,7 @@ impl MySqlClient {
         Ok(Self { pool })
     }
 
-    pub async fn list_databases(
-        &self,
-        include_system: bool,
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         const SYSTEM_DATABASES: &[&str] =
             &["information_schema", "mysql", "performance_schema", "sys"];
 
@@ -53,10 +50,7 @@ impl MySqlClient {
         Ok(filtered)
     }
 
-    pub async fn list_tables(
-        &self,
-        database: &str,
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = '{}' ORDER BY table_name",
@@ -66,10 +60,7 @@ impl MySqlClient {
         Ok(tables)
     }
 
-    pub async fn execute_query(
-        &self,
-        query: &str,
-    ) -> Result<QueryResult, Box<dyn Error + Send + Sync>> {
+    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
         let mut conn = self.pool.get_conn().await?;
         let query_upper = query.trim().to_uppercase();
 
@@ -107,9 +98,17 @@ impl MySqlClient {
                 Ok(_) => Ok(QueryResult::Execute {
                     rows_affected: conn.affected_rows(),
                 }),
-                Err(e) => Err(e.into()),
+                Err(e) => Err(SqliError::Query(e.to_string())),
             }
         }
+    }
+
+    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
+        format!("SELECT * FROM {} LIMIT {}", table, limit)
+    }
+
+    pub fn describe_table_query(&self, table: &str, _database: Option<&str>) -> String {
+        format!("DESCRIBE {}", table)
     }
 
     fn format_value(value: Option<Value>) -> String {
@@ -137,17 +136,5 @@ impl MySqlClient {
                 }
             }
         }
-    }
-
-    pub fn select_table_query(table: &str, limit: usize) -> String {
-        format!("SELECT * FROM {} LIMIT {}", table, limit)
-    }
-
-    pub fn describe_table_query(table: &str, _database: Option<&str>) -> String {
-        format!("DESCRIBE {}", table)
-    }
-
-    pub fn default_database() -> &'static str {
-        ""
     }
 }
