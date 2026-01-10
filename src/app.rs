@@ -629,13 +629,10 @@ impl App {
             .split(inner);
 
         frame.render_widget(
-            Paragraph::new(format!("Delete '{}'?", template_name)).style(Style::default().fg(TEXT)),
+            Paragraph::new(format!("Delete '{}'? y/N", template_name))
+                .style(Style::default().fg(TEXT))
+                .alignment(Alignment::Center),
             chunks[0],
-        );
-
-        frame.render_widget(
-            Paragraph::new("(y)es/(n)o").style(Style::default().fg(TEXT_DIM)),
-            chunks[1],
         );
     }
 }
