@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    tags: ['v*']
+    # branches: [master]
+  # pull_request:
+    # branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run tests
+        run: cargo test --verbose
+
+  build-linux:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build amd64
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Build arm64
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Package
+        run: |
+          tar czf sqli-linux-amd64.tar.gz -C target/x86_64-unknown-linux-gnu/release sqli
+          tar czf sqli-linux-arm64.tar.gz -C target/aarch64-unknown-linux-gnu/release sqli
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: sqli-linux-*.tar.gz
+
+  build-macos:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Package
+        run: |
+          tar czf sqli-macos-arm64.tar.gz -C target/aarch64-apple-darwin/release sqli
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: sqli-macos-*.tar.gz
+
+  release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.tar.gz
+          generate_release_notes: true
