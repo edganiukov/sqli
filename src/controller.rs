@@ -255,6 +255,7 @@ pub struct Controller {
     pub template_store: TemplateStore,
     pub template_list_cache: Vec<Template>,
     pub needs_redraw: bool,
+    pub pending_escape: bool,
 }
 
 impl Controller {
@@ -275,6 +276,7 @@ impl Controller {
             template_store,
             template_list_cache: Vec::new(),
             needs_redraw: false,
+            pending_escape: false,
         }
     }
 
@@ -609,6 +611,23 @@ impl Controller {
         // Handle popup state first
         if !matches!(self.popup_state, PopupState::None) {
             self.handle_popup_keys(key_event);
+            return;
+        }
+
+        // Handle Esc + : for command mode
+        if self.pending_escape {
+            self.pending_escape = false;
+            if key_event.code == KeyCode::Char(':') {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
+                return;
+            }
+            // Any other key after Esc - pass through
+        }
+
+        // Esc sets pending_escape flag
+        if key_event.code == KeyCode::Esc {
+            self.pending_escape = true;
             return;
         }
 

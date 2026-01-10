@@ -41,6 +41,7 @@ A terminal-based SQL client. Supports multiple database backends.
 ### Query Editor
 | Key | Action |
 |-----|--------|
+| `Esc` then `:` | Enter command mode |
 | `Ctrl+O` | Open templates list |
 | `Ctrl+S` | Save current query as template |
 | `Ctrl+G` | Edit query in external editor (`$EDITOR`) |
