@@ -518,7 +518,7 @@ impl Controller {
             KeyCode::Tab => {
                 self.current_tab_mut().focus = Focus::Query;
             }
-            KeyCode::BackTab | KeyCode::Esc => {
+            KeyCode::BackTab => {
                 self.current_tab_mut().focus = Focus::Output;
             }
             KeyCode::Char('l') | KeyCode::Right => {
@@ -635,7 +635,7 @@ impl Controller {
                 self.current_tab_mut().focus = Focus::Output;
                 return;
             }
-            KeyCode::BackTab | KeyCode::Esc => {
+            KeyCode::BackTab => {
                 self.focus_sidebar();
                 return;
             }
@@ -674,7 +674,7 @@ impl Controller {
             KeyCode::Tab => {
                 self.focus_sidebar();
             }
-            KeyCode::BackTab | KeyCode::Esc => {
+            KeyCode::BackTab => {
                 self.current_tab_mut().focus = Focus::Query;
             }
             KeyCode::Char('j') | KeyCode::Down => {
