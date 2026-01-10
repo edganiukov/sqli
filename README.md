@@ -2,7 +2,7 @@
 
 A terminal-based SQL client. Supports multiple database backends.
 
-**NOTE: the project is vibe-coded.**
+**NOTE: the project is fully vibe-coded.**
 
 ## Supported Databases
 
@@ -26,61 +26,15 @@ A terminal-based SQL client. Supports multiple database backends.
 
 ## Keybindings
 
-### Global
-| Key | Action |
-|-----|--------|
-| `:` | Enter command mode |
-| `Tab` | Cycle focus forward |
-| `Shift+Tab` / `Esc` | Cycle focus backwards |
-| `Ctrl+h` / `Ctrl+Left` | Focus left (to Sidebar) |
-| `Ctrl+l` / `Ctrl+Right` | Focus right (to Query) |
-| `Ctrl+k` / `Ctrl+Up` | Focus up (to Query) |
-| `Ctrl+j` / `Ctrl+Down` | Focus down (to Output) |
-| `F5` | Execute query |
+**Navigation:** `Tab`/`Shift+Tab` cycle focus, `Ctrl+hjkl` directional focus.
 
-### Query Editor
-| Key | Action |
-|-----|--------|
-| `Esc` then `:` | Enter command mode |
-| `Ctrl+O` | Open templates list |
-| `Ctrl+S` | Save current query as template |
-| `Ctrl+G` | Edit query in external editor (`$EDITOR`) |
+**Query Editor:** `F5`/`Ctrl+J` execute, `Ctrl+O` open templates, `Ctrl+S` save template, `Ctrl+G` external editor, `Esc :` command mode.
 
-### Templates Popup
-| Key | Action |
-|-----|--------|
-| `j/k` or arrows | Navigate templates |
-| `Enter` | Insert selected template |
-| `Ctrl+G` | Edit template in external editor |
-| `Ctrl+D` | Delete template |
-| `Esc` | Close popup |
+**Sidebar:** `j/k` navigate, `Enter` expand/preview, `d` describe, `r` refresh.
 
-### Sidebar
-| Key | Action |
-|-----|--------|
-| `j/k` or arrows | Navigate |
-| `Enter` | Expand database / Preview table |
-| `d` | Describe table structure |
-| `r` | Refresh databases |
-| `l` or `Right` | Move to query panel |
+**Output:** `j/k` scroll, `gg`/`G` top/bottom, `PageUp/Down` fast scroll.
 
-### Output
-| Key | Action |
-|-----|--------|
-| `j/k` | Scroll line by line |
-| `PageUp/PageDown` | Scroll by 10 rows |
-| `gg` | Scroll to top |
-| `G` | Scroll to bottom |
-
-### Commands
-| Command | Action |
-|---------|--------|
-| `:q` | Close current tab (quit if last) |
-| `:qa` | Quit application |
-| `:new` | New tab |
-| `:next` / `:prev` | Switch tabs |
-| `:sysdb` | Toggle system databases |
-| `:help` | Show help |
+**Commands:** `:q` quit, `:qa` quit all, `:new` new tab, `:next/:prev` switch tabs, `:sysdb` toggle system DBs, `:help`.
 
 ## Configuration
 
