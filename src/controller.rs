@@ -640,6 +640,7 @@ impl Controller {
         // Ctrl shortcuts
         if key_event.modifiers.contains(KeyModifiers::CONTROL) {
             match key_event.code {
+                KeyCode::Char('r') => self.execute_query(),
                 KeyCode::Char('o') => self.open_template_popup(),
                 KeyCode::Char('s') => self.open_save_template_popup(),
                 KeyCode::Char('g') => self.edit_query_in_editor(),
@@ -871,7 +872,7 @@ impl Controller {
 
     fn show_help(&mut self) {
         let help =
-            ":q quit | F5 exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor | Ctrl+hjkl nav";
+            ":q quit | F5/Ctrl+R exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor | Ctrl+hjkl nav";
         self.current_tab_mut().status_message = Some(help.to_string());
     }
 

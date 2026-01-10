@@ -28,7 +28,7 @@ A terminal-based SQL client. Supports multiple database backends.
 
 **Navigation:** `Tab`/`Shift+Tab` cycle focus, `Ctrl+hjkl` directional focus.
 
-**Query Editor:** `F5`/`Ctrl+J` execute, `Ctrl+O` open templates, `Ctrl+S` save template, `Ctrl+G` external editor, `Esc :` command mode.
+**Query Editor:** `F5`/`Ctrl+R` execute, `Ctrl+O` open templates, `Ctrl+S` save template, `Ctrl+G` external editor, `Esc :` command mode.
 
 **Sidebar:** `j/k` navigate, `Enter` expand/preview, `d` describe, `r` refresh.
 
