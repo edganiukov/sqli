@@ -26,15 +26,34 @@ A terminal-based SQL client. Supports multiple database backends.
 
 ## Keybindings
 
-**Navigation:** `Tab`/`Shift+Tab` cycle focus, `Ctrl+hjkl` directional focus.
+**Navigation**
+- `Tab` / `Shift+Tab` - cycle focus
+- `Ctrl+h/j/k/l` - directional focus
 
-**Query Editor:** `F5`/`Ctrl+R` execute, `Ctrl+O` open templates, `Ctrl+S` save template, `Ctrl+G` external editor, `Esc :` command mode.
+**Query Editor**
+- `F5` / `Ctrl+R` - execute query
+- `Ctrl+O` - open templates
+- `Ctrl+S` - save template
+- `Ctrl+G` - external editor
+- `Esc :` - command mode
 
-**Sidebar:** `j/k` navigate, `Enter` expand/preview, `d` describe, `r` refresh.
+**Sidebar**
+- `j/k` - navigate
+- `Enter` - expand/preview
+- `d` - describe
+- `r` - refresh
 
-**Output:** `j/k` scroll, `gg`/`G` top/bottom, `PageUp/Down` fast scroll.
+**Output**
+- `j/k` - scroll
+- `gg/G` - top/bottom
+- `PageUp/Down` - page scroll
 
-**Commands:** `:q` quit, `:qa` quit all, `:new` new tab, `:next/:prev` switch tabs, `:sysdb` toggle system DBs, `:help`.
+**Commands**
+- `:q` - quit
+- `:qa` - quit all
+- `:new` - new tab
+- `:next/:prev` - switch tabs
+- `:sysdb` - toggle system DBs
 
 ## Configuration
 
