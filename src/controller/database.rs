@@ -132,10 +132,12 @@ impl Controller {
             self.current_tab_mut().status_message = Some("Executing...".to_string());
         }
 
+        let start = std::time::Instant::now();
         let result = self.runtime.block_on(async {
             let client = conn.create_client(&db_name).await?;
             client.execute_query(&query).await
         });
+        let elapsed = start.elapsed();
 
         let tab = self.current_tab_mut();
         tab.result_scroll = 0;
@@ -147,12 +149,18 @@ impl Controller {
                 tab.query_result = Some(query_result.clone());
                 match &query_result {
                     QueryResult::Select { rows, .. } => {
-                        tab.status_message =
-                            Some(format!("[{}] {} row(s) returned", timestamp, rows.len()));
+                        tab.status_message = Some(format!(
+                            "[{}] {} row(s) returned in {:.2?}",
+                            timestamp,
+                            rows.len(),
+                            elapsed
+                        ));
                     }
                     QueryResult::Execute { rows_affected } => {
-                        tab.status_message =
-                            Some(format!("[{}] {} row(s) affected", timestamp, rows_affected));
+                        tab.status_message = Some(format!(
+                            "[{}] {} row(s) affected in {:.2?}",
+                            timestamp, rows_affected, elapsed
+                        ));
                         should_refresh = true;
                     }
                 }
