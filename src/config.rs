@@ -11,7 +11,7 @@ pub struct ConnectionConfig {
     #[serde(rename = "type")]
     pub db_type: String,
     pub host: String,
-    #[serde(default = "default_port")]
+    #[serde(default)]
     pub port: u16,
     #[serde(default)]
     pub user: String,
@@ -23,10 +23,6 @@ pub struct ConnectionConfig {
     pub tls: bool,
     #[serde(default)]
     pub readonly: bool,
-}
-
-fn default_port() -> u16 {
-    5432
 }
 
 impl ConnectionConfig {

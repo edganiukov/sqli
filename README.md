@@ -40,17 +40,17 @@ A terminal-based SQL client. Supports multiple database backends.
 **Sidebar**
 - `j/k` - navigate
 - `Enter` - expand/preview
-- `d` - describe
-- `r` - refresh
+- `d` - describe a table
+- `r` - refresh the Sidebar
 
 **Output**
 - `j/k` - scroll
-- `gg/G` - top/bottom
+- `gg/G` - go top/bottom
 - `PageUp/Down` - page scroll
 
 **Commands**
-- `:q` - quit
-- `:qa` - quit all
+- `:q` - quit a tab
+- `:qa` or `q!` - quit all tabs
 - `:new` - new tab
 - `:next/:prev` - switch tabs
 - `:sysdb` - toggle system DBs
@@ -123,12 +123,12 @@ LIMIT <limit>;
 SELECT * FROM <table> WHERE id = <id>;
 ```
 
-- Each template starts with `--- Name [scope]`
-- Scope is either `global` (all connections) or a connection name
-- Templates can contain `<placeholder>` markers - cursor will be positioned there on insert
-- Use `Ctrl+S` to save the current query as a template
-- Use `Ctrl+O` to open the templates list
-- Use `Ctrl+G` to edit a template in your `$EDITOR` (edits name, scope, and query)
+- Each template starts with `--- Name [scope]`.
+- Scope is either `global` (all connections) or a connection name.
+- Templates can contain `<placeholder>` markers - cursor will be positioned there on insert.
+- Use `Ctrl+S` to save the current query as a template.
+- Use `Ctrl+O` to open the templates list.
+- Use `Ctrl+G` to edit a template in your `$EDITOR` (edits name, scope, and query).
 
 ## Building
 
