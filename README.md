@@ -128,6 +128,7 @@ SELECT * FROM <table> WHERE id = <id>;
 - Templates can contain `<placeholder>` markers - cursor will be positioned there on insert.
 - Use `Ctrl+S` to save the current query as a template.
 - Use `Ctrl+O` to open the templates list.
+- Use `/` to search templates by name (vim-style).
 - Use `Ctrl+G` to edit a template in your `$EDITOR` (edits name, scope, and query).
 
 ## Building

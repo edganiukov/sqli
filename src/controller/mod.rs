@@ -40,6 +40,8 @@ pub enum PopupState {
     None,
     TemplateList {
         selected: usize,
+        filter: String,
+        searching: bool,
     },
     SaveTemplate {
         name: String,

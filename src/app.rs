@@ -491,8 +491,12 @@ impl App {
 
     fn draw_popup(&self, frame: &mut Frame) {
         match &self.controller.popup_state {
-            PopupState::TemplateList { selected } => {
-                self.draw_template_list_popup(frame, *selected);
+            PopupState::TemplateList {
+                selected,
+                filter,
+                searching,
+            } => {
+                self.draw_template_list_popup(frame, *selected, filter, *searching);
             }
             PopupState::SaveTemplate { name, scope } => {
                 self.draw_save_template_popup(frame, name, scope);
@@ -504,12 +508,41 @@ impl App {
         }
     }
 
-    fn draw_template_list_popup(&self, frame: &mut Frame, selected: usize) {
+    fn draw_template_list_popup(
+        &self,
+        frame: &mut Frame,
+        selected: usize,
+        filter: &str,
+        searching: bool,
+    ) {
         let area = frame.area();
-        let templates = &self.controller.template_list_cache;
+        let all_templates = &self.controller.template_list_cache;
+
+        // Filter templates by search filter
+        let filter_lower = filter.to_lowercase();
+        let templates: Vec<_> = all_templates
+            .iter()
+            .filter(|t| t.name.to_lowercase().contains(&filter_lower))
+            .collect();
 
         let popup_area = centered_rect_pct(area, 0.6, 0.7, 40, 10);
         frame.render_widget(Clear, popup_area);
+
+        // Render block first and get inner area
+        let block = popup_block("Templates (/ search, Ctrl+G edit, Ctrl+D delete)", BLUE);
+        let inner_area = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        // Split inner area if searching (list + search bar inside the border)
+        let (list_area, search_area) = if searching {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(inner_area);
+            (chunks[0], Some(chunks[1]))
+        } else {
+            (inner_area, None)
+        };
 
         let items: Vec<ListItem> = templates
             .iter()
@@ -544,17 +577,22 @@ impl App {
             })
             .collect();
 
-        let block = popup_block("Templates (Ctrl+G edit, Ctrl+D delete)", BLUE);
-
         let list = List::new(items)
-            .block(block)
             .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
             .highlight_symbol("> ");
 
         let mut list_state = ListState::default();
         list_state.select(Some(selected.min(templates.len().saturating_sub(1))));
 
-        frame.render_stateful_widget(list, popup_area, &mut list_state);
+        frame.render_stateful_widget(list, list_area, &mut list_state);
+
+        // Draw search input at bottom if searching (inside the border)
+        if let Some(search_area) = search_area {
+            let search_text = format!("/{}_", filter);
+            let search_paragraph = Paragraph::new(search_text).style(Style::default().fg(TEXT));
+
+            frame.render_widget(search_paragraph, search_area);
+        }
     }
 
     fn draw_save_template_popup(&self, frame: &mut Frame, name: &str, scope: &TemplateScope) {

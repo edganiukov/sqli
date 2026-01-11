@@ -20,7 +20,11 @@ impl Controller {
             return;
         }
 
-        self.popup_state = PopupState::TemplateList { selected: 0 };
+        self.popup_state = PopupState::TemplateList {
+            selected: 0,
+            filter: String::new(),
+            searching: false,
+        };
     }
 
     pub(super) fn open_save_template_popup(&mut self) {
@@ -45,8 +49,12 @@ impl Controller {
 
     pub(super) fn handle_popup_keys(&mut self, key_event: KeyEvent) {
         match &self.popup_state.clone() {
-            PopupState::TemplateList { selected } => {
-                self.handle_template_list_keys(key_event, *selected);
+            PopupState::TemplateList {
+                selected,
+                filter,
+                searching,
+            } => {
+                self.handle_template_list_keys(key_event, *selected, filter.clone(), *searching);
             }
             PopupState::SaveTemplate { name, scope } => {
                 self.handle_save_template_keys(key_event, name.clone(), scope.clone());
@@ -58,39 +66,136 @@ impl Controller {
         }
     }
 
-    fn handle_template_list_keys(&mut self, key_event: KeyEvent, selected: usize) {
-        match key_event.code {
-            KeyCode::Esc => {
-                self.popup_state = PopupState::None;
-            }
-            KeyCode::Enter => {
-                self.apply_selected_template(selected);
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                let max = self.template_list_cache.len().saturating_sub(1);
-                let new_selected = (selected + 1).min(max);
-                self.popup_state = PopupState::TemplateList {
-                    selected: new_selected,
-                };
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                let new_selected = selected.saturating_sub(1);
-                self.popup_state = PopupState::TemplateList {
-                    selected: new_selected,
-                };
-            }
-            KeyCode::Char('d') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(template) = self.template_list_cache.get(selected) {
-                    self.popup_state = PopupState::ConfirmDelete {
-                        index: selected,
-                        name: template.name.clone(),
+    /// Get templates filtered by the current search filter
+    fn filtered_templates(&self, filter: &str) -> Vec<&Template> {
+        let filter_lower = filter.to_lowercase();
+        self.template_list_cache
+            .iter()
+            .filter(|t| t.name.to_lowercase().contains(&filter_lower))
+            .collect()
+    }
+
+    fn handle_template_list_keys(
+        &mut self,
+        key_event: KeyEvent,
+        selected: usize,
+        mut filter: String,
+        searching: bool,
+    ) {
+        if searching {
+            // Search mode: typing in the filter
+            match key_event.code {
+                KeyCode::Esc => {
+                    // Exit search mode and clear filter
+                    self.popup_state = PopupState::TemplateList {
+                        selected: 0,
+                        filter: String::new(),
+                        searching: false,
                     };
                 }
+                KeyCode::Enter => {
+                    // Exit search mode, keep filter
+                    self.popup_state = PopupState::TemplateList {
+                        selected,
+                        filter,
+                        searching: false,
+                    };
+                }
+                KeyCode::Char('u') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Clear filter (like vim Ctrl+U)
+                    self.popup_state = PopupState::TemplateList {
+                        selected: 0,
+                        filter: String::new(),
+                        searching: true,
+                    };
+                }
+                KeyCode::Char(c) => {
+                    filter.push(c);
+                    self.popup_state = PopupState::TemplateList {
+                        selected: 0, // Reset selection when filter changes
+                        filter,
+                        searching: true,
+                    };
+                }
+                KeyCode::Backspace => {
+                    filter.pop();
+                    self.popup_state = PopupState::TemplateList {
+                        selected: 0, // Reset selection when filter changes
+                        filter,
+                        searching: true,
+                    };
+                }
+                _ => {}
             }
-            KeyCode::Char('g') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.edit_template_in_editor(selected);
+        } else {
+            // Normal mode: navigation and actions
+            let filtered = self.filtered_templates(&filter);
+            let max = filtered.len().saturating_sub(1);
+
+            match key_event.code {
+                KeyCode::Esc => {
+                    self.popup_state = PopupState::None;
+                }
+                KeyCode::Enter => {
+                    // Apply the selected template from filtered list
+                    if let Some(template) = filtered.get(selected) {
+                        // Find index in original cache
+                        if let Some(idx) = self
+                            .template_list_cache
+                            .iter()
+                            .position(|t| t.name == template.name)
+                        {
+                            self.apply_selected_template(idx);
+                        }
+                    }
+                }
+                KeyCode::Char('/') => {
+                    // Enter search mode
+                    self.popup_state = PopupState::TemplateList {
+                        selected,
+                        filter,
+                        searching: true,
+                    };
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let new_selected = (selected + 1).min(max);
+                    self.popup_state = PopupState::TemplateList {
+                        selected: new_selected,
+                        filter,
+                        searching: false,
+                    };
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let new_selected = selected.saturating_sub(1);
+                    self.popup_state = PopupState::TemplateList {
+                        selected: new_selected,
+                        filter,
+                        searching: false,
+                    };
+                }
+                KeyCode::Char('d') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Delete from filtered list
+                    if let Some(template) = filtered.get(selected) {
+                        self.popup_state = PopupState::ConfirmDelete {
+                            index: selected,
+                            name: template.name.clone(),
+                        };
+                    }
+                }
+                KeyCode::Char('g') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Edit from filtered list
+                    if let Some(template) = filtered.get(selected) {
+                        if let Some(idx) = self
+                            .template_list_cache
+                            .iter()
+                            .position(|t| t.name == template.name)
+                        {
+                            self.edit_template_in_editor(idx);
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -157,7 +262,11 @@ impl Controller {
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 // Go back to template list
-                self.popup_state = PopupState::TemplateList { selected: index };
+                self.popup_state = PopupState::TemplateList {
+                    selected: index,
+                    filter: String::new(),
+                    searching: false,
+                };
             }
             _ => {}
         }
@@ -270,7 +379,11 @@ impl Controller {
                 // Refresh the cache
                 self.open_template_popup();
                 // Restore selection
-                self.popup_state = PopupState::TemplateList { selected };
+                self.popup_state = PopupState::TemplateList {
+                    selected,
+                    filter: String::new(),
+                    searching: false,
+                };
             }
             Err(e) => {
                 self.current_tab_mut().status_message = Some(format!("Editor error: {}", e));
