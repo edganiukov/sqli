@@ -32,9 +32,7 @@ fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_> {
             Span::styled("── ", Style::default().fg(border_color)),
             Span::styled(
                 title,
-                Style::default()
-                    .fg(border_color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(border_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" ──", Style::default().fg(border_color)),
         ]))
@@ -69,12 +67,8 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
 
 // UI Helper: Calculate centered popup area with percentage
 fn centered_rect_pct(area: Rect, width_pct: f32, height_pct: f32, min_w: u16, min_h: u16) -> Rect {
-    let popup_width = ((area.width as f32 * width_pct) as u16)
-        .max(min_w)
-        .min(area.width);
-    let popup_height = ((area.height as f32 * height_pct) as u16)
-        .max(min_h)
-        .min(area.height);
+    let popup_width = ((area.width as f32 * width_pct) as u16).max(min_w).min(area.width);
+    let popup_height = ((area.height as f32 * height_pct) as u16).max(min_h).min(area.height);
     Rect {
         x: (area.width.saturating_sub(popup_width)) / 2,
         y: (area.height.saturating_sub(popup_height)) / 2,
@@ -209,10 +203,7 @@ impl App {
         for (i, tab) in self.controller.tabs.iter().enumerate() {
             let tab_name = format!(" {} ", tab.name);
             let style = if i == self.controller.current_tab {
-                Style::default()
-                    .fg(SURFACE)
-                    .bg(BLUE)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(SURFACE).bg(BLUE).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT_DIM).bg(SURFACE_LIGHT)
             };
@@ -351,9 +342,7 @@ impl App {
         let list = List::new(items)
             .block(block)
             .highlight_style(
-                Style::default()
-                    .bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT })
-                    .fg(TEXT),
+                Style::default().bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT }).fg(TEXT),
             )
             .highlight_symbol(if is_focused { "> " } else { "  " });
 
@@ -370,23 +359,15 @@ impl App {
 
         let block = panel_block("Query", is_focused, Borders::BOTTOM);
 
-        self.controller
-            .query_textarea
-            .set_style(Style::default().bg(bg_color).fg(TEXT));
-        self.controller
-            .query_textarea
-            .set_cursor_style(Style::default().bg(if is_focused {
-                Color::White
-            } else {
-                TEXT_DIM
-            }));
-        self.controller
-            .query_textarea
-            .set_cursor_line_style(Style::default());
+        self.controller.query_textarea.set_style(Style::default().bg(bg_color).fg(TEXT));
+        self.controller.query_textarea.set_cursor_style(Style::default().bg(if is_focused {
+            Color::White
+        } else {
+            TEXT_DIM
+        }));
+        self.controller.query_textarea.set_cursor_line_style(Style::default());
         self.controller.query_textarea.set_block(block);
-        self.controller
-            .query_textarea
-            .set_line_number_style(Style::default().fg(TEXT_DIM));
+        self.controller.query_textarea.set_line_number_style(Style::default().fg(TEXT_DIM));
         frame.render_widget(&self.controller.query_textarea, area);
     }
 
@@ -434,36 +415,31 @@ impl App {
                         Cell::from(h.as_str())
                             .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
-                    let header = Row::new(header_cells)
-                        .height(1)
-                        .style(Style::default().bg(SURFACE_LIGHT));
+                    let header =
+                        Row::new(header_cells).height(1).style(Style::default().bg(SURFACE_LIGHT));
 
                     // Calculate visible rows based on scroll position
                     let visible_height = inner_area.height.saturating_sub(1) as usize; // -1 for header
                     let scroll = tab.result_scroll;
                     let cursor = tab.result_cursor;
 
-                    let visible_rows = rows
-                        .iter()
-                        .enumerate()
-                        .skip(scroll)
-                        .take(visible_height)
-                        .map(|(idx, row)| {
-                            let cells = row
-                                .iter()
-                                .map(|c| Cell::from(c.as_str()).style(Style::default().fg(TEXT)));
-                            let row = Row::new(cells).height(1);
-                            if idx == cursor && is_focused {
-                                row.style(Style::default().bg(HIGHLIGHT))
-                            } else {
-                                row.style(Style::default().bg(bg_color))
-                            }
-                        });
+                    let visible_rows =
+                        rows.iter().enumerate().skip(scroll).take(visible_height).map(
+                            |(idx, row)| {
+                                let cells = row.iter().map(|c| {
+                                    Cell::from(c.as_str()).style(Style::default().fg(TEXT))
+                                });
+                                let row = Row::new(cells).height(1);
+                                if idx == cursor && is_focused {
+                                    row.style(Style::default().bg(HIGHLIGHT))
+                                } else {
+                                    row.style(Style::default().bg(bg_color))
+                                }
+                            },
+                        );
 
-                    let widths: Vec<Constraint> = col_widths
-                        .iter()
-                        .map(|&w| Constraint::Length(w as u16))
-                        .collect();
+                    let widths: Vec<Constraint> =
+                        col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
 
                     let table = Table::new(visible_rows, widths)
                         .header(header)
@@ -551,14 +527,8 @@ impl App {
                     TemplateScope::Global => "[global]".to_string(),
                     TemplateScope::Connection(name) => format!("[{}]", name),
                 };
-                let preview: String = t
-                    .query
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .chars()
-                    .take(40)
-                    .collect();
+                let preview: String =
+                    t.query.lines().next().unwrap_or("").chars().take(40).collect();
 
                 ListItem::new(vec![
                     Line::from(vec![
@@ -659,7 +629,7 @@ impl App {
             .split(inner);
 
         frame.render_widget(
-            Paragraph::new(format!("Delete '{}'? y/N", template_name))
+            Paragraph::new(format!("Delete '{}'? [y/N]", template_name))
                 .style(Style::default().fg(TEXT))
                 .alignment(Alignment::Center),
             chunks[0],
