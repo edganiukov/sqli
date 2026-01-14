@@ -86,6 +86,18 @@ fn focus_colors(is_focused: bool) -> (Color, Color) {
     }
 }
 
+// UI Helper: Truncate string to max width with ellipsis
+fn truncate_str(s: &str, max_width: usize) -> String {
+    if s.len() <= max_width {
+        s.to_string()
+    } else if max_width <= 3 {
+        s.chars().take(max_width).collect()
+    } else {
+        let truncated: String = s.chars().take(max_width - 3).collect();
+        format!("{}...", truncated)
+    }
+}
+
 pub struct App {
     controller: Controller,
 }
@@ -389,6 +401,8 @@ impl App {
                     frame.render_widget(msg, inner_area);
                 } else {
                     // Calculate column widths based on content
+                    let available_width = inner_area.width as usize;
+
                     let mut col_widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
                     for row in rows.iter() {
                         for (i, cell) in row.iter().enumerate() {
@@ -397,23 +411,29 @@ impl App {
                             }
                         }
                     }
-                    // Add padding
+                    // Add padding and cap very wide columns
                     for w in col_widths.iter_mut() {
-                        *w += 2;
+                        *w = (*w + 2).min(60);
                     }
-                    // Scale down if total exceeds available width
+                    // Scale down to fit available width
                     let total_width: usize = col_widths.iter().sum();
-                    let available_width = inner_area.width as usize;
-                    if total_width > available_width {
+                    if total_width > available_width && available_width > 0 {
                         let scale = available_width as f64 / total_width as f64;
-                        for w in col_widths.iter_mut() {
-                            *w = ((*w as f64 * scale) as usize).max(4);
+                        let num_cols = col_widths.len();
+                        let mut remaining = available_width;
+                        for (i, w) in col_widths.iter_mut().enumerate() {
+                            if i == num_cols - 1 {
+                                *w = remaining;
+                            } else {
+                                *w = ((*w as f64 * scale) as usize).max(4);
+                                remaining = remaining.saturating_sub(*w);
+                            }
                         }
                     }
 
-                    let header_cells = columns.iter().map(|h| {
-                        Cell::from(h.as_str())
-                            .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
+                    let header_cells = columns.iter().zip(col_widths.iter()).map(|(h, &w)| {
+                        let text = truncate_str(h, w.saturating_sub(1));
+                        Cell::from(text).style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
                     let header =
                         Row::new(header_cells).height(1).style(Style::default().bg(SURFACE_LIGHT));
@@ -426,8 +446,9 @@ impl App {
                     let visible_rows =
                         rows.iter().enumerate().skip(scroll).take(visible_height).map(
                             |(idx, row)| {
-                                let cells = row.iter().map(|c| {
-                                    Cell::from(c.as_str()).style(Style::default().fg(TEXT))
+                                let cells = row.iter().zip(col_widths.iter()).map(|(c, &w)| {
+                                    let text = truncate_str(c, w.saturating_sub(1));
+                                    Cell::from(text).style(Style::default().fg(TEXT))
                                 });
                                 let row = Row::new(cells).height(1);
                                 if idx == cursor && is_focused {
@@ -479,6 +500,9 @@ impl App {
             }
             PopupState::ConfirmDelete { name, .. } => {
                 self.draw_confirm_delete_popup(frame, name);
+            }
+            PopupState::RecordDetail { row_index, scroll } => {
+                self.draw_record_detail_popup(frame, *row_index, *scroll);
             }
             PopupState::None => {}
         }
@@ -635,4 +659,152 @@ impl App {
             chunks[0],
         );
     }
+
+    fn draw_record_detail_popup(&self, frame: &mut Frame, row_index: usize, scroll: usize) {
+        let tab = self.controller.current_tab();
+
+        let Some(QueryResult::Select { columns, rows }) = &tab.query_result else {
+            return;
+        };
+
+        let Some(row) = rows.get(row_index) else {
+            return;
+        };
+
+        let area = frame.area();
+        // Large popup - 90% width, 80% height
+        let popup_area = centered_rect_pct(area, 0.9, 0.8, 60, 20);
+        frame.render_widget(Clear, popup_area);
+
+        let title = format!("Record {} of {}", row_index + 1, rows.len());
+        let block = popup_block(&title, BLUE);
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        // Calculate the maximum field name width for alignment
+        let max_name_width = columns.iter().map(|c| c.len()).max().unwrap_or(0);
+        let value_width = inner.width.saturating_sub(max_name_width as u16 + 4) as usize; // 4 for " : " and padding
+
+        // Build lines for each field, wrapping long values
+        let mut lines: Vec<Line> = Vec::new();
+        for (col, value) in columns.iter().zip(row.iter()) {
+            // First line includes the field name
+            let field_name = format!("{:>width$}", col, width = max_name_width);
+
+            if value.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled(field_name, Style::default().fg(WARNING)),
+                    Span::styled(" : ", Style::default().fg(TEXT_DIM)),
+                    Span::styled("(empty)", Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)),
+                ]));
+            } else {
+                // Wrap long values
+                let value_lines = wrap_text(value, value_width);
+                for (i, line_text) in value_lines.iter().enumerate() {
+                    if i == 0 {
+                        lines.push(Line::from(vec![
+                            Span::styled(field_name.clone(), Style::default().fg(WARNING)),
+                            Span::styled(" : ", Style::default().fg(TEXT_DIM)),
+                            Span::styled(line_text.clone(), Style::default().fg(TEXT)),
+                        ]));
+                    } else {
+                        // Continuation lines - indent to align with value
+                        let indent = " ".repeat(max_name_width + 3);
+                        lines.push(Line::from(vec![
+                            Span::styled(indent, Style::default()),
+                            Span::styled(line_text.clone(), Style::default().fg(TEXT)),
+                        ]));
+                    }
+                }
+            }
+            // Add empty line between fields for readability
+            lines.push(Line::from(""));
+        }
+
+        // Clamp scroll to valid range
+        let max_scroll = lines.len().saturating_sub(inner.height as usize);
+        let actual_scroll = scroll.min(max_scroll);
+
+        // Show scroll indicator in the content if there's more content
+        let total_lines = lines.len();
+        let visible_lines = inner.height as usize;
+
+        let paragraph = Paragraph::new(lines)
+            .style(Style::default().bg(SURFACE))
+            .scroll((actual_scroll as u16, 0));
+
+        frame.render_widget(paragraph, inner);
+
+        // Draw scroll indicator on the right edge if content overflows
+        if total_lines > visible_lines {
+            let h = inner.height as usize;
+            let thumb_h = (h * visible_lines / total_lines).max(1);
+            let thumb_pos = if max_scroll > 0 { actual_scroll * (h - thumb_h) / max_scroll } else { 0 };
+
+            let scrollbar: String = (0..h)
+                .map(|i| if i >= thumb_pos && i < thumb_pos + thumb_h { "█" } else { "░" })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let scrollbar_area = Rect {
+                x: inner.x + inner.width.saturating_sub(1),
+                y: inner.y,
+                width: 1,
+                height: inner.height,
+            };
+            frame.render_widget(
+                Paragraph::new(scrollbar).style(Style::default().fg(TEXT_DIM)),
+                scrollbar_area,
+            );
+        }
+    }
+}
+
+/// Wrap text to fit within a given width, breaking on word boundaries when possible
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width == 0 {
+        return vec![text.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        if line.len() <= max_width {
+            lines.push(line.to_string());
+            continue;
+        }
+
+        let mut current = String::new();
+        for word in line.split_whitespace() {
+            let needed = if current.is_empty() { word.len() } else { current.len() + 1 + word.len() };
+
+            if needed <= max_width {
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(word);
+            } else if word.len() > max_width {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                }
+                for chunk in word.as_bytes().chunks(max_width) {
+                    lines.push(String::from_utf8_lossy(chunk).into_owned());
+                }
+            } else {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                }
+                current = word.to_string();
+            }
+        }
+
+        if !current.is_empty() {
+            lines.push(current);
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
 }

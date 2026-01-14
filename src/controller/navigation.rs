@@ -1,4 +1,4 @@
-use super::{Controller, Focus, QueryResult};
+use super::{Controller, Focus, PopupState, QueryResult};
 
 impl Controller {
     pub fn new_tab(&mut self) {
@@ -104,6 +104,18 @@ impl Controller {
             } else if tab.result_cursor >= tab.result_scroll + visible_height {
                 tab.result_scroll = tab.result_cursor - visible_height + 1;
             }
+        }
+    }
+
+    pub(super) fn open_record_detail(&mut self) {
+        let tab = self.current_tab();
+        if let Some(QueryResult::Select { rows, .. }) = &tab.query_result
+            && !rows.is_empty()
+        {
+            self.popup_state = PopupState::RecordDetail {
+                row_index: tab.result_cursor,
+                scroll: 0,
+            };
         }
     }
 }

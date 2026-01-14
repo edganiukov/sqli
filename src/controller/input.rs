@@ -164,6 +164,36 @@ impl Controller {
     }
 
     fn handle_output_keys(&mut self, key_code: KeyCode) {
+        // Handle record detail popup first
+        if let PopupState::RecordDetail { scroll, .. } = &mut self.popup_state {
+            match key_code {
+                KeyCode::Esc => {
+                    self.popup_state = PopupState::None;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *scroll = scroll.saturating_add(1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    *scroll = scroll.saturating_sub(1);
+                }
+                KeyCode::Char('g') => {
+                    *scroll = 0;
+                }
+                KeyCode::Char('G') => {
+                    // Set to large value, rendering will clamp it
+                    *scroll = usize::MAX;
+                }
+                KeyCode::PageDown => {
+                    *scroll = scroll.saturating_add(10);
+                }
+                KeyCode::PageUp => {
+                    *scroll = scroll.saturating_sub(10);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         // Use a reasonable default visible height (will be adjusted by scroll logic)
         const VISIBLE_HEIGHT: usize = 20;
 
@@ -206,6 +236,9 @@ impl Controller {
             }
             KeyCode::Char('G') => {
                 self.scroll_to_end();
+            }
+            KeyCode::Enter => {
+                self.open_record_detail();
             }
             KeyCode::F(5) => {
                 self.execute_query();

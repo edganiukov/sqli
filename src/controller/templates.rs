@@ -62,6 +62,9 @@ impl Controller {
             PopupState::ConfirmDelete { index, name } => {
                 self.handle_confirm_delete_keys(key_event, *index, name.clone());
             }
+            PopupState::RecordDetail { .. } => {
+                // Handled in handle_output_keys
+            }
             PopupState::None => {}
         }
     }

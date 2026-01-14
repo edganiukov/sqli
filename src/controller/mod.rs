@@ -51,6 +51,10 @@ pub enum PopupState {
         index: usize,
         name: String,
     },
+    RecordDetail {
+        row_index: usize,
+        scroll: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
