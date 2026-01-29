@@ -100,13 +100,18 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
         },
         None => {
             debug_log!("No config file found, using defaults");
-            if let Some(config_dir) = dirs::config_dir() {
-                let expected = config_dir.join("sqli").join("config.toml");
+            if let Some(config_dir) = get_config_dir() {
+                let expected = config_dir.join("config.toml");
                 debug_log!("Expected config at: {:?}", expected);
             }
             default_connections()
         }
     }
+}
+
+fn get_config_dir() -> Option<PathBuf> {
+    // Use ~/.config on all platforms for consistency
+    dirs::home_dir().map(|h| h.join(".config").join("sqli"))
 }
 
 fn get_config_path() -> Option<PathBuf> {
@@ -117,8 +122,8 @@ fn get_config_path() -> Option<PathBuf> {
     }
 
     // Priority 2: user config directory (~/.config/sqli/config.toml)
-    if let Some(config_dir) = dirs::config_dir() {
-        let user_config = config_dir.join("sqli").join("config.toml");
+    if let Some(config_dir) = get_config_dir() {
+        let user_config = config_dir.join("config.toml");
         if user_config.exists() {
             return Some(user_config);
         }

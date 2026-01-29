@@ -60,7 +60,8 @@ impl TemplateStore {
     }
 
     fn get_templates_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("sqli").join("templates.sql"))
+        // Use ~/.config on all platforms for consistency
+        dirs::home_dir().map(|h| h.join(".config").join("sqli").join("templates.sql"))
     }
 
     pub fn get_templates_for_connection(&self, connection_name: &str) -> Vec<&Template> {
