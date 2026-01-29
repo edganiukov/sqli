@@ -34,7 +34,7 @@ impl PostgresClient {
     }
 
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
-        const SYSTEM_DATABASES: &[&str] = &["postgres", "template0", "template1"];
+        const SYSTEM_DATABASES: &[&str] = &["template0", "template1"];
 
         let rows = self
             .client
