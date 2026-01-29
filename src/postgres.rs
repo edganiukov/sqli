@@ -182,6 +182,32 @@ impl PostgresClient {
                 v.map(|t| t.format("%H:%M:%S%.3f").to_string())
                     .unwrap_or_else(|| "NULL".to_string())
             }),
+            Type::BYTEA => row.try_get::<_, Option<Vec<u8>>>(idx).map(|v| {
+                v.map(|bytes| {
+                    if bytes.len() <= 32 {
+                        format!("\\x{}", hex::encode(&bytes))
+                    } else {
+                        format!("<bytea: {} bytes>", bytes.len())
+                    }
+                })
+                .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::TEXT_ARRAY => row.try_get::<_, Option<Vec<String>>>(idx).map(|v| {
+                v.map(|arr| format!("{{{}}}", arr.join(",")))
+                    .unwrap_or_else(|| "NULL".to_string())
+            }),
+            Type::INT4_ARRAY => row.try_get::<_, Option<Vec<i32>>>(idx).map(|v| {
+                v.map(|arr| {
+                    format!(
+                        "{{{}}}",
+                        arr.iter()
+                            .map(|n| n.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )
+                })
+                .unwrap_or_else(|| "NULL".to_string())
+            }),
             _ => {
                 // For unsupported types, try string first, then show type name
                 row.try_get::<_, Option<String>>(idx)
