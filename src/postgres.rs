@@ -26,7 +26,7 @@ impl PostgresClient {
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
+                crate::debug_log!("Postgres connection error: {}", e);
             }
         });
 

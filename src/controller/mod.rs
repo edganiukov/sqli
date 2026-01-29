@@ -123,8 +123,7 @@ impl DatabaseConn {
             match run_password_command(cmd) {
                 Ok(pwd) => return pwd,
                 Err(e) => {
-                    crate::debug_log!("Failed to run password_cmd: {}", e);
-                    eprintln!("Failed to run password_cmd: {}", e);
+                    crate::debug_log!("Failed to run password_cmd '{}': {}", cmd, e);
                 }
             }
         }
