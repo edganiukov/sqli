@@ -1,8 +1,9 @@
-use thiserror::Error;
+use std::error::Error;
+use thiserror::Error as ThisError;
 
 pub type Result<T> = std::result::Result<T, SqliError>;
 
-#[derive(Debug, Error)]
+#[derive(Debug, ThisError)]
 pub enum SqliError {
     #[error("Connection failed: {0}")]
     Connection(String),
@@ -19,7 +20,36 @@ pub enum SqliError {
 
 impl From<tokio_postgres::Error> for SqliError {
     fn from(e: tokio_postgres::Error) -> Self {
-        SqliError::Connection(e.to_string())
+        // Log full error for debugging
+        crate::debug_log!("Postgres error: {:?}", e);
+
+        // Extract detailed error info from postgres
+        if let Some(db_err) = e.as_db_error() {
+            crate::debug_log!(
+                "DB error details - severity: {}, code: {}, message: {}, detail: {:?}, hint: {:?}",
+                db_err.severity(),
+                db_err.code().code(),
+                db_err.message(),
+                db_err.detail(),
+                db_err.hint()
+            );
+            let mut msg = db_err.message().to_string();
+            if let Some(detail) = db_err.detail() {
+                msg.push_str(" - ");
+                msg.push_str(detail);
+            }
+            if let Some(hint) = db_err.hint() {
+                msg.push_str(" (hint: ");
+                msg.push_str(hint);
+                msg.push(')');
+            }
+            SqliError::Query(msg)
+        } else if let Some(source) = e.source() {
+            // IO or other connection errors
+            SqliError::Connection(source.to_string())
+        } else {
+            SqliError::Connection(e.to_string())
+        }
     }
 }
 
