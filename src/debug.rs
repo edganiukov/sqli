@@ -16,14 +16,7 @@ pub fn init(enabled: bool) -> Option<PathBuf> {
         return None;
     }
 
-    let log_path = dirs::config_dir()
-        .map(|p| p.join("sqli").join("debug.log"))
-        .unwrap_or_else(|| PathBuf::from("sqli-debug.log"));
-
-    // Ensure parent directory exists
-    if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
+    let log_path = PathBuf::from("/tmp/sqli.log");
 
     match OpenOptions::new()
         .create(true)
