@@ -75,21 +75,49 @@ fn run_password_command(cmd: &str) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
-    let config_path = custom_path.or_else(get_config_path);
+pub fn load_config(custom_path: Option<PathBuf>, debug: bool) -> Vec<DatabaseConn> {
+    let config_path = custom_path.clone().or_else(get_config_path);
+
+    if debug {
+        if let Some(ref path) = custom_path {
+            println!("[debug] Custom config path: {:?}", path);
+        }
+        println!(
+            "[debug] Resolved config path: {:?}",
+            config_path.as_ref().map(|p| p.display().to_string())
+        );
+    }
 
     match config_path {
         Some(path) => match fs::read_to_string(&path) {
             Ok(content) => match toml::from_str::<HashMap<String, ConnectionConfig>>(&content) {
                 Ok(configs) => {
+                    if debug {
+                        println!("[debug] Parsed {} connection(s) from config", configs.len());
+                    }
                     let mut connections: Vec<DatabaseConn> = configs
                         .iter()
-                        .filter_map(|(name, config)| config.to_database_conn(name))
+                        .filter_map(|(name, config)| {
+                            let conn = config.to_database_conn(name);
+                            if debug && conn.is_none() {
+                                println!(
+                                    "[debug] Skipping connection '{}': unknown type '{}'",
+                                    name, config.db_type
+                                );
+                            }
+                            conn
+                        })
                         .collect();
                     connections.sort_by(|a, b| a.name.cmp(&b.name));
                     if connections.is_empty() {
+                        if debug {
+                            println!("[debug] No valid connections found, using defaults");
+                        }
                         default_connections()
                     } else {
+                        if debug {
+                            println!("[debug] Loaded {} connection(s)", connections.len());
+                        }
                         connections
                     }
                 }
@@ -103,7 +131,18 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
                 default_connections()
             }
         },
-        None => default_connections(),
+        None => {
+            if debug {
+                println!("[debug] No config file found, using defaults");
+                if let Some(config_dir) = dirs::config_dir() {
+                    println!(
+                        "[debug] Expected config at: {:?}",
+                        config_dir.join("sqli").join("config.toml")
+                    );
+                }
+            }
+            default_connections()
+        }
     }
 }
 

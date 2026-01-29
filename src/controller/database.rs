@@ -1,5 +1,6 @@
 use super::{Controller, DatabaseType, SidebarItem};
 use crate::db::QueryResult;
+use crate::debug_log;
 use chrono::Local;
 use tui_textarea::TextArea;
 
@@ -10,6 +11,14 @@ impl Controller {
             Some(c) => c.clone(),
             None => return,
         };
+
+        debug_log!(
+            "Connecting to {} ({}://{}:{})",
+            conn.name,
+            conn.db_type.as_str(),
+            conn.host,
+            conn.port
+        );
 
         tab.status_message = Some("Connecting...".to_string());
         tab.name = conn.name.clone();
@@ -22,6 +31,7 @@ impl Controller {
         let include_system = tab.show_system_databases;
         match result {
             Ok(client) => {
+                debug_log!("Connected successfully, listing databases...");
                 let databases = self
                     .runtime
                     .block_on(async { client.list_databases(include_system).await });
@@ -29,6 +39,7 @@ impl Controller {
                 let tab = self.current_tab_mut();
                 match databases {
                     Ok(dbs) => {
+                        debug_log!("Found {} database(s)", dbs.len());
                         tab.current_database = dbs.first().cloned();
                         tab.databases = dbs;
                         tab.db_client = Some(client);
@@ -38,11 +49,13 @@ impl Controller {
                         tab.focus = super::Focus::Sidebar;
                     }
                     Err(e) => {
+                        debug_log!("Failed to list databases: {}", e);
                         tab.status_message = Some(format!("Failed to list databases: {}", e));
                     }
                 }
             }
             Err(e) => {
+                debug_log!("Connection failed: {}", e);
                 tab.status_message = Some(format!("Connection failed: {}", e));
             }
         }
@@ -86,9 +99,11 @@ impl Controller {
         let tab = self.current_tab_mut();
         match result {
             Ok(tables) => {
+                debug_log!("Loaded {} table(s) for database '{}'", tables.len(), db_name);
                 tab.sidebar.tables.insert(db_name, tables);
             }
             Err(e) => {
+                debug_log!("Failed to load tables for '{}': {}", db_name, e);
                 tab.status_message = Some(format!("Failed to load tables: {}", e));
             }
         }
@@ -110,6 +125,7 @@ impl Controller {
 
         // Block non-read operations on readonly connections
         if conn.readonly && !Self::is_read_query(&query) {
+            debug_log!("Blocked write query on readonly connection: {}", query.trim());
             self.current_tab_mut().status_message =
                 Some("Connection is read-only, only SELECT queries allowed".to_string());
             return;
@@ -120,6 +136,12 @@ impl Controller {
             Some(db) => (db, false),
             None => (conn.db_type.default_database().to_string(), true),
         };
+
+        debug_log!(
+            "Executing query on database '{}': {}",
+            db_name,
+            query.trim().replace('\n', " ")
+        );
 
         if using_default {
             let msg = if db_name.is_empty() {
@@ -149,6 +171,7 @@ impl Controller {
                 tab.query_result = Some(query_result.clone());
                 match &query_result {
                     QueryResult::Select { rows, .. } => {
+                        debug_log!("Query returned {} row(s) in {:?}", rows.len(), elapsed);
                         tab.status_message = Some(format!(
                             "[{}] {} row(s) returned in {:.2?}",
                             timestamp,
@@ -157,6 +180,7 @@ impl Controller {
                         ));
                     }
                     QueryResult::Execute { rows_affected } => {
+                        debug_log!("Query affected {} row(s) in {:?}", rows_affected, elapsed);
                         tab.status_message = Some(format!(
                             "[{}] {} row(s) affected in {:.2?}",
                             timestamp, rows_affected, elapsed
@@ -166,6 +190,7 @@ impl Controller {
                 }
             }
             Err(e) => {
+                debug_log!("Query error: {}", e);
                 tab.query_result = None;
                 tab.status_message = Some(format!("Error: [{}] {}", timestamp, e));
             }
@@ -196,6 +221,7 @@ impl Controller {
         let tab = self.current_tab_mut();
         match result {
             Ok(dbs) => {
+                debug_log!("Refreshed database list: {} database(s)", dbs.len());
                 // Preserve current database if still in list
                 let current = tab.current_database.clone();
                 tab.databases = dbs;
@@ -212,6 +238,7 @@ impl Controller {
                 tab.rebuild_sidebar_items();
             }
             Err(e) => {
+                debug_log!("Failed to refresh databases: {}", e);
                 tab.status_message = Some(format!("Failed to refresh databases: {}", e));
             }
         }
