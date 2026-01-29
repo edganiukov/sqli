@@ -9,11 +9,11 @@ static DEBUG_LOG: Mutex<Option<File>> = Mutex::new(None);
 static DEBUG_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-pub fn init(enabled: bool) -> Option<PathBuf> {
+pub fn init(enabled: bool) {
     DEBUG_ENABLED.store(enabled, std::sync::atomic::Ordering::SeqCst);
 
     if !enabled {
-        return None;
+        return;
     }
 
     let log_path = PathBuf::from("/tmp/sqli.log");
@@ -30,12 +30,8 @@ pub fn init(enabled: bool) -> Option<PathBuf> {
                 Local::now().format("%Y-%m-%d %H:%M:%S")
             );
             *DEBUG_LOG.lock().unwrap() = Some(file);
-            Some(log_path)
         }
-        Err(e) => {
-            eprintln!("[debug] Failed to open log file {:?}: {}", log_path, e);
-            None
-        }
+        Err(_) => {}
     }
 }
 

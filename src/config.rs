@@ -47,34 +47,33 @@ impl ConnectionConfig {
     }
 }
 
-pub fn load_config(custom_path: Option<PathBuf>, debug: bool) -> Vec<DatabaseConn> {
+pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
+    use crate::debug_log;
+
     let config_path = custom_path.clone().or_else(get_config_path);
 
-    if debug {
-        if let Some(ref path) = custom_path {
-            println!("[debug] Custom config path: {:?}", path);
-        }
-        println!(
-            "[debug] Resolved config path: {:?}",
-            config_path.as_ref().map(|p| p.display().to_string())
-        );
+    if let Some(ref path) = custom_path {
+        debug_log!("Custom config path: {:?}", path);
     }
+    debug_log!(
+        "Resolved config path: {:?}",
+        config_path.as_ref().map(|p| p.display().to_string())
+    );
 
     match config_path {
         Some(path) => match fs::read_to_string(&path) {
             Ok(content) => match toml::from_str::<HashMap<String, ConnectionConfig>>(&content) {
                 Ok(configs) => {
-                    if debug {
-                        println!("[debug] Parsed {} connection(s) from config", configs.len());
-                    }
+                    debug_log!("Parsed {} connection(s) from config", configs.len());
                     let mut connections: Vec<DatabaseConn> = configs
                         .iter()
                         .filter_map(|(name, config)| {
                             let conn = config.to_database_conn(name);
-                            if debug && conn.is_none() {
-                                println!(
-                                    "[debug] Skipping connection '{}': unknown type '{}'",
-                                    name, config.db_type
+                            if conn.is_none() {
+                                debug_log!(
+                                    "Skipping connection '{}': unknown type '{}'",
+                                    name,
+                                    config.db_type
                                 );
                             }
                             conn
@@ -82,36 +81,28 @@ pub fn load_config(custom_path: Option<PathBuf>, debug: bool) -> Vec<DatabaseCon
                         .collect();
                     connections.sort_by(|a, b| a.name.cmp(&b.name));
                     if connections.is_empty() {
-                        if debug {
-                            println!("[debug] No valid connections found, using defaults");
-                        }
+                        debug_log!("No valid connections found, using defaults");
                         default_connections()
                     } else {
-                        if debug {
-                            println!("[debug] Loaded {} connection(s)", connections.len());
-                        }
+                        debug_log!("Loaded {} connection(s)", connections.len());
                         connections
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to parse config file: {}", e);
+                    debug_log!("Failed to parse config file: {}", e);
                     default_connections()
                 }
             },
             Err(e) => {
-                eprintln!("Failed to read config file: {}", e);
+                debug_log!("Failed to read config file: {}", e);
                 default_connections()
             }
         },
         None => {
-            if debug {
-                println!("[debug] No config file found, using defaults");
-                if let Some(config_dir) = dirs::config_dir() {
-                    println!(
-                        "[debug] Expected config at: {:?}",
-                        config_dir.join("sqli").join("config.toml")
-                    );
-                }
+            debug_log!("No config file found, using defaults");
+            if let Some(config_dir) = dirs::config_dir() {
+                let expected = config_dir.join("sqli").join("config.toml");
+                debug_log!("Expected config at: {:?}", expected);
             }
             default_connections()
         }

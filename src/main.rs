@@ -42,12 +42,10 @@ fn main() -> io::Result<()> {
     let args = Args::parse();
 
     // Initialize debug logging before anything else
-    if let Some(log_path) = debug::init(args.debug) {
-        println!("[debug] Logging to: {}", log_path.display());
-    }
+    debug::init(args.debug);
 
     // Load config before entering raw mode so errors are visible
-    let connections = config::load_config(args.config, args.debug);
+    let connections = config::load_config(args.config);
     let mut terminal = setup_terminal()?;
     let result = run(&mut terminal, connections);
     restore_terminal()?;
