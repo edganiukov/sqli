@@ -75,22 +75,25 @@ impl Controller {
             _ => db_name.clone(),
         };
 
-        let result = self.runtime.block_on(async {
-            let client = conn.create_client(&connect_db).await?;
-            client.list_tables(&schema).await
+        let tab = self.current_tab_mut();
+        tab.loading = true;
+        tab.status_message = Some("Loading tables...".to_string());
+
+        let db_name_clone = db_name.clone();
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async {
+                let client = conn.create_client(&connect_db).await?;
+                client.list_tables(&schema).await
+            }
+            .await;
+            let _ = tx.send(result);
         });
 
-        let tab = self.current_tab_mut();
-        match result {
-            Ok(tables) => {
-                debug_log!("Loaded {} table(s) for database '{}'", tables.len(), db_name);
-                tab.sidebar.tables.insert(db_name, tables);
-            }
-            Err(e) => {
-                debug_log!("Failed to load tables for '{}': {}", db_name, e);
-                tab.status_message = Some(format!("Failed to load tables: {}", e));
-            }
-        }
+        self.pending_operation = Some(PendingOperation::LoadTables {
+            receiver: rx,
+            db_name: db_name_clone,
+        });
     }
 
     pub(super) fn execute_query(&mut self) {

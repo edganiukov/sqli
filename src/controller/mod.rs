@@ -28,6 +28,10 @@ pub enum PendingOperation {
         db_name: String,
         start: std::time::Instant,
     },
+    LoadTables {
+        receiver: oneshot::Receiver<Result<Vec<String>>>,
+        db_name: String,
+    },
 }
 
 fn run_password_command(cmd: &str) -> std::io::Result<String> {
@@ -467,6 +471,43 @@ impl Controller {
                         let tab = self.current_tab_mut();
                         tab.loading = false;
                         tab.status_message = Some("Query task failed".to_string());
+                    }
+                }
+            }
+            PendingOperation::LoadTables { mut receiver, db_name } => {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        let tab = self.current_tab_mut();
+                        tab.loading = false;
+                        match result {
+                            Ok(tables) => {
+                                crate::debug_log!(
+                                    "Loaded {} table(s) for database '{}'",
+                                    tables.len(),
+                                    db_name
+                                );
+                                tab.sidebar.tables.insert(db_name, tables);
+                                tab.rebuild_sidebar_items();
+                                tab.status_message = None;
+                            }
+                            Err(e) => {
+                                crate::debug_log!("Failed to load tables for '{}': {}", db_name, e);
+                                tab.status_message =
+                                    Some(format!("Failed to load tables: {}", e));
+                            }
+                        }
+                    }
+                    Err(oneshot::error::TryRecvError::Empty) => {
+                        // Still pending
+                        self.pending_operation = Some(PendingOperation::LoadTables {
+                            receiver,
+                            db_name,
+                        });
+                    }
+                    Err(oneshot::error::TryRecvError::Closed) => {
+                        let tab = self.current_tab_mut();
+                        tab.loading = false;
+                        tab.status_message = Some("Load tables task failed".to_string());
                     }
                 }
             }
