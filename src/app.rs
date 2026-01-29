@@ -413,9 +413,11 @@ impl App {
                     let msg = Paragraph::new("No results").style(Style::default().fg(TEXT_DIM).bg(bg_color));
                     frame.render_widget(msg, inner_area);
                 } else {
-                    // Calculate column widths based on content
                     let available_width = inner_area.width as usize;
+                    let min_col_width: usize = 12;
+                    let max_col_width: usize = 50;
 
+                    // Calculate column widths based on content
                     let mut col_widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
                     for row in rows.iter() {
                         for (i, cell) in row.iter().enumerate() {
@@ -424,28 +426,53 @@ impl App {
                             }
                         }
                     }
-                    // Add padding and cap very wide columns
+                    // Add padding and apply min/max
                     for w in col_widths.iter_mut() {
-                        *w = (*w + 2).min(60);
-                    }
-                    // Scale down to fit available width
-                    let total_width: usize = col_widths.iter().sum();
-                    if total_width > available_width && available_width > 0 {
-                        let scale = available_width as f64 / total_width as f64;
-                        let num_cols = col_widths.len();
-                        let mut remaining = available_width;
-                        for (i, w) in col_widths.iter_mut().enumerate() {
-                            if i == num_cols - 1 {
-                                *w = remaining;
-                            } else {
-                                *w = ((*w as f64 * scale) as usize).max(4);
-                                remaining = remaining.saturating_sub(*w);
-                            }
-                        }
+                        *w = (*w + 2).clamp(min_col_width, max_col_width);
                     }
 
-                    let header_cells = columns.iter().zip(col_widths.iter()).map(|(h, &w)| {
-                        let text = truncate_str(h, w.saturating_sub(1));
+                    // Calculate horizontal scroll bounds
+                    let total_width: usize = col_widths.iter().sum();
+                    let h_scroll = tab.result_h_scroll;
+                    let max_h_scroll = total_width.saturating_sub(available_width);
+                    let h_scroll = h_scroll.min(max_h_scroll);
+
+                    // Find which columns are visible based on h_scroll
+                    let mut x_offset = 0usize;
+                    let mut start_col = 0usize;
+                    let mut start_col_offset = 0usize;
+
+                    for (i, &w) in col_widths.iter().enumerate() {
+                        if x_offset + w > h_scroll {
+                            start_col = i;
+                            start_col_offset = h_scroll.saturating_sub(x_offset);
+                            break;
+                        }
+                        x_offset += w;
+                    }
+
+                    // Build visible columns with adjusted widths
+                    let mut visible_col_widths = Vec::new();
+                    let mut visible_col_indices = Vec::new();
+                    let mut remaining_width = available_width;
+
+                    for (i, &w) in col_widths.iter().enumerate().skip(start_col) {
+                        if remaining_width == 0 {
+                            break;
+                        }
+                        let effective_width = if i == start_col {
+                            w.saturating_sub(start_col_offset)
+                        } else {
+                            w
+                        };
+                        let col_w = effective_width.min(remaining_width);
+                        visible_col_widths.push(col_w);
+                        visible_col_indices.push(i);
+                        remaining_width = remaining_width.saturating_sub(col_w);
+                    }
+
+                    let header_cells = visible_col_indices.iter().zip(visible_col_widths.iter()).map(|(&col_idx, &w)| {
+                        let text = truncate_str(&columns[col_idx], w.saturating_sub(1));
                         Cell::from(text).style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
                     let header = Row::new(header_cells)
@@ -463,8 +490,9 @@ impl App {
                         .skip(scroll)
                         .take(visible_height)
                         .map(|(idx, row)| {
-                            let cells = row.iter().zip(col_widths.iter()).map(|(c, &w)| {
-                                let text = truncate_str(c, w.saturating_sub(1));
+                            let cells = visible_col_indices.iter().zip(visible_col_widths.iter()).map(|(&col_idx, &w)| {
+                                let cell_text = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                                let text = truncate_str(cell_text, w.saturating_sub(1));
                                 Cell::from(text).style(Style::default().fg(TEXT))
                             });
                             let row = Row::new(cells).height(1);
@@ -475,7 +503,7 @@ impl App {
                             }
                         });
 
-                    let widths: Vec<Constraint> = col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
+                    let widths: Vec<Constraint> = visible_col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
 
                     let table = Table::new(visible_rows, widths)
                         .header(header)

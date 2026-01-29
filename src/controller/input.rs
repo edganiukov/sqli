@@ -225,11 +225,25 @@ impl Controller {
             KeyCode::Char('k') | KeyCode::Up => {
                 self.move_cursor(-1, VISIBLE_HEIGHT);
             }
+            KeyCode::Char('h') | KeyCode::Left => {
+                let tab = self.current_tab_mut();
+                tab.result_h_scroll = tab.result_h_scroll.saturating_sub(4);
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                let tab = self.current_tab_mut();
+                tab.result_h_scroll = tab.result_h_scroll.saturating_add(4);
+            }
             KeyCode::PageDown => {
                 self.move_cursor(10, VISIBLE_HEIGHT);
             }
             KeyCode::PageUp => {
                 self.move_cursor(-10, VISIBLE_HEIGHT);
+            }
+            KeyCode::Char('0') => {
+                self.current_tab_mut().result_h_scroll = 0;
+            }
+            KeyCode::Char('$') => {
+                self.current_tab_mut().result_h_scroll = usize::MAX;
             }
             KeyCode::Char('g') => {
                 self.current_tab_mut().pending_g = true;

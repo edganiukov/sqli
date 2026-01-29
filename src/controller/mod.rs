@@ -227,6 +227,7 @@ pub struct Tab {
     pub query_result: Option<QueryResult>,
     pub result_scroll: usize,
     pub result_cursor: usize,
+    pub result_h_scroll: usize,
     pub pending_g: bool,
     pub status_message: Option<String>,
     pub show_system_databases: bool,
@@ -249,6 +250,7 @@ impl Tab {
             query_result: None,
             result_scroll: 0,
             result_cursor: 0,
+            result_h_scroll: 0,
             pending_g: false,
             status_message: None,
             show_system_databases: false,
@@ -418,6 +420,7 @@ impl Controller {
                         tab.loading = false;
                         tab.result_scroll = 0;
                         tab.result_cursor = 0;
+                        tab.result_h_scroll = 0;
                         let timestamp = Local::now().format("%H:%M:%S");
 
                         match result {
