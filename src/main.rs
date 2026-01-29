@@ -79,11 +79,20 @@ fn run(
 
         terminal.draw(|frame| app.draw(frame))?;
 
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            app.handle_key(key);
+        // Poll pending async operations
+        app.poll_pending();
+
+        // Use poll with timeout to allow spinner animation
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                app.handle_key(key);
+            }
         }
+
+        // Tick spinner
+        app.tick_spinner();
 
         if app.quit() {
             break;

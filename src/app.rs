@@ -122,6 +122,14 @@ impl App {
         }
     }
 
+    pub fn tick_spinner(&mut self) {
+        self.controller.tick_spinner();
+    }
+
+    pub fn poll_pending(&mut self) {
+        self.controller.poll_pending();
+    }
+
     pub fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
@@ -150,7 +158,16 @@ impl App {
 
         // Status line
         let tab = self.controller.current_tab();
-        let status_msg = tab.status_message.as_deref().unwrap_or("");
+        let status_msg = if tab.loading {
+            let spinner = self.controller.spinner_char();
+            format!(
+                "{} {}",
+                spinner,
+                tab.status_message.as_deref().unwrap_or("")
+            )
+        } else {
+            tab.status_message.as_deref().unwrap_or("").to_string()
+        };
 
         let status_line = if view_state == ViewState::DatabaseView {
             let conn = tab.connections.get(tab.selected_index);

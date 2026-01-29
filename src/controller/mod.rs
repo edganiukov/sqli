@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::templates::{Template, TemplateStore};
 use std::collections::HashMap;
 use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
 use tui_textarea::TextArea;
 
 use std::process::Command;
@@ -16,6 +17,18 @@ use crate::cassandra::CassandraClient;
 use crate::clickhouse::ClickHouseClient;
 use crate::mysql::MySqlClient;
 use crate::postgres::PostgresClient;
+
+pub enum PendingOperation {
+    Connect {
+        receiver: oneshot::Receiver<Result<(DatabaseClient, Vec<String>)>>,
+        conn_name: String,
+    },
+    Query {
+        receiver: oneshot::Receiver<Result<QueryResult>>,
+        db_name: String,
+        start: std::time::Instant,
+    },
+}
 
 fn run_password_command(cmd: &str) -> std::io::Result<String> {
     let output = if cfg!(target_os = "windows") {
@@ -213,6 +226,7 @@ pub struct Tab {
     pub pending_g: bool,
     pub status_message: Option<String>,
     pub show_system_databases: bool,
+    pub loading: bool,
 }
 
 impl Tab {
@@ -234,6 +248,7 @@ impl Tab {
             pending_g: false,
             status_message: None,
             show_system_databases: false,
+            loading: false,
         }
     }
 
@@ -300,6 +315,8 @@ pub struct Controller {
     pub template_list_cache: Vec<Template>,
     pub needs_redraw: bool,
     pub pending_escape: bool,
+    pub spinner_state: usize,
+    pub pending_operation: Option<PendingOperation>,
 }
 
 impl Controller {
@@ -317,6 +334,8 @@ impl Controller {
             runtime,
             popup_state: PopupState::default(),
             template_store,
+            spinner_state: 0,
+            pending_operation: None,
             template_list_cache: Vec::new(),
             needs_redraw: false,
             pending_escape: false,
@@ -329,5 +348,128 @@ impl Controller {
 
     pub fn current_tab_mut(&mut self) -> &mut Tab {
         &mut self.tabs[self.current_tab]
+    }
+
+    pub fn tick_spinner(&mut self) {
+        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        self.spinner_state = (self.spinner_state + 1) % SPINNER_CHARS.len();
+    }
+
+    pub fn spinner_char(&self) -> char {
+        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        SPINNER_CHARS[self.spinner_state]
+    }
+
+    pub fn poll_pending(&mut self) {
+        use chrono::Local;
+
+        let op = match self.pending_operation.take() {
+            Some(op) => op,
+            None => return,
+        };
+
+        match op {
+            PendingOperation::Connect { mut receiver, conn_name } => {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        let tab = self.current_tab_mut();
+                        tab.loading = false;
+                        match result {
+                            Ok((client, dbs)) => {
+                                crate::debug_log!("Found {} database(s)", dbs.len());
+                                tab.current_database = dbs.first().cloned();
+                                tab.databases = dbs;
+                                tab.db_client = Some(client);
+                                tab.rebuild_sidebar_items();
+                                tab.status_message = None;
+                                tab.view_state = ViewState::DatabaseView;
+                                tab.focus = Focus::Sidebar;
+                            }
+                            Err(e) => {
+                                crate::debug_log!("Connection failed: {}", e);
+                                tab.status_message = Some(format!("Connection failed: {}", e));
+                            }
+                        }
+                        self.query_textarea = TextArea::default();
+                    }
+                    Err(oneshot::error::TryRecvError::Empty) => {
+                        // Still pending
+                        self.pending_operation = Some(PendingOperation::Connect {
+                            receiver,
+                            conn_name,
+                        });
+                    }
+                    Err(oneshot::error::TryRecvError::Closed) => {
+                        let tab = self.current_tab_mut();
+                        tab.loading = false;
+                        tab.status_message = Some("Connection task failed".to_string());
+                    }
+                }
+            }
+            PendingOperation::Query { mut receiver, db_name, start } => {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        let elapsed = start.elapsed();
+                        let tab = self.current_tab_mut();
+                        tab.loading = false;
+                        tab.result_scroll = 0;
+                        tab.result_cursor = 0;
+                        let timestamp = Local::now().format("%H:%M:%S");
+
+                        match result {
+                            Ok(query_result) => {
+                                tab.query_result = Some(query_result.clone());
+                                match &query_result {
+                                    QueryResult::Select { rows, .. } => {
+                                        crate::debug_log!(
+                                            "Query returned {} row(s) in {:?}",
+                                            rows.len(),
+                                            elapsed
+                                        );
+                                        tab.status_message = Some(format!(
+                                            "[{}] {} row(s) returned in {:.2?}",
+                                            timestamp,
+                                            rows.len(),
+                                            elapsed
+                                        ));
+                                    }
+                                    QueryResult::Execute { rows_affected } => {
+                                        crate::debug_log!(
+                                            "Query affected {} row(s) in {:?}",
+                                            rows_affected,
+                                            elapsed
+                                        );
+                                        tab.status_message = Some(format!(
+                                            "[{}] {} row(s) affected in {:.2?}",
+                                            timestamp, rows_affected, elapsed
+                                        ));
+                                        // TODO: refresh databases
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                crate::debug_log!("Query error on database '{}': {}", db_name, e);
+                                tab.query_result = None;
+                                tab.status_message =
+                                    Some(format!("Error [{}]: {}", db_name, e));
+                            }
+                        }
+                    }
+                    Err(oneshot::error::TryRecvError::Empty) => {
+                        // Still pending
+                        self.pending_operation = Some(PendingOperation::Query {
+                            receiver,
+                            db_name,
+                            start,
+                        });
+                    }
+                    Err(oneshot::error::TryRecvError::Closed) => {
+                        let tab = self.current_tab_mut();
+                        tab.loading = false;
+                        tab.status_message = Some("Query task failed".to_string());
+                    }
+                }
+            }
+        }
     }
 }

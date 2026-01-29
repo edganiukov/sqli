@@ -1,7 +1,6 @@
-use super::{Controller, DatabaseType, SidebarItem};
-use crate::db::QueryResult;
+use super::{Controller, DatabaseType, PendingOperation, SidebarItem};
 use crate::debug_log;
-use chrono::Local;
+use tokio::sync::oneshot;
 use tui_textarea::TextArea;
 
 impl Controller {
@@ -21,44 +20,29 @@ impl Controller {
         );
 
         tab.status_message = Some("Connecting...".to_string());
+        tab.loading = true;
         tab.name = conn.name.clone();
         tab.connected_db = Some(conn.name.clone());
 
-        let db_name = conn.db_type.default_database().to_string();
-        let result = self.runtime.block_on(conn.create_client(&db_name));
-
-        let tab = self.current_tab_mut();
         let include_system = tab.show_system_databases;
-        match result {
-            Ok(client) => {
-                debug_log!("Connected successfully, listing databases...");
-                let databases = self
-                    .runtime
-                    .block_on(async { client.list_databases(include_system).await });
+        let conn_name = conn.name.clone();
 
-                let tab = self.current_tab_mut();
-                match databases {
-                    Ok(dbs) => {
-                        debug_log!("Found {} database(s)", dbs.len());
-                        tab.current_database = dbs.first().cloned();
-                        tab.databases = dbs;
-                        tab.db_client = Some(client);
-                        tab.rebuild_sidebar_items();
-                        tab.status_message = None;
-                        tab.view_state = super::ViewState::DatabaseView;
-                        tab.focus = super::Focus::Sidebar;
-                    }
-                    Err(e) => {
-                        debug_log!("Failed to list databases: {}", e);
-                        tab.status_message = Some(format!("Failed to list databases: {}", e));
-                    }
-                }
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let db_name = conn.db_type.default_database().to_string();
+            let result = async {
+                let client = conn.create_client(&db_name).await?;
+                let dbs = client.list_databases(include_system).await?;
+                Ok((client, dbs))
             }
-            Err(e) => {
-                debug_log!("Connection failed: {}", e);
-                tab.status_message = Some(format!("Connection failed: {}", e));
-            }
-        }
+            .await;
+            let _ = tx.send(result);
+        });
+
+        self.pending_operation = Some(PendingOperation::Connect {
+            receiver: rx,
+            conn_name,
+        });
         self.query_textarea = TextArea::default();
     }
 
@@ -145,62 +129,39 @@ impl Controller {
             query.trim().replace('\n', " ")
         );
 
-        if using_default {
-            let msg = if db_name.is_empty() {
-                "No keyspace selected, using none...".to_string()
+        {
+            let tab = self.current_tab_mut();
+            tab.loading = true;
+            if using_default {
+                let msg = if db_name.is_empty() {
+                    "No keyspace selected, using none...".to_string()
+                } else {
+                    format!("No database selected, using '{}'...", db_name)
+                };
+                tab.status_message = Some(msg);
             } else {
-                format!("No database selected, using '{}'...", db_name)
-            };
-            self.current_tab_mut().status_message = Some(msg);
-        } else {
-            self.current_tab_mut().status_message = Some("Executing...".to_string());
+                tab.status_message = Some("Executing...".to_string());
+            }
         }
 
         let start = std::time::Instant::now();
-        let result = self.runtime.block_on(async {
-            let client = conn.create_client(&db_name).await?;
-            client.execute_query(&query).await
+        let db_name_clone = db_name.clone();
+
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async {
+                let client = conn.create_client(&db_name_clone).await?;
+                client.execute_query(&query).await
+            }
+            .await;
+            let _ = tx.send(result);
         });
-        let elapsed = start.elapsed();
 
-        let tab = self.current_tab_mut();
-        tab.result_scroll = 0;
-        tab.result_cursor = 0;
-        let timestamp = Local::now().format("%H:%M:%S");
-        let mut should_refresh = false;
-        match result {
-            Ok(query_result) => {
-                tab.query_result = Some(query_result.clone());
-                match &query_result {
-                    QueryResult::Select { rows, .. } => {
-                        debug_log!("Query returned {} row(s) in {:?}", rows.len(), elapsed);
-                        tab.status_message = Some(format!(
-                            "[{}] {} row(s) returned in {:.2?}",
-                            timestamp,
-                            rows.len(),
-                            elapsed
-                        ));
-                    }
-                    QueryResult::Execute { rows_affected } => {
-                        debug_log!("Query affected {} row(s) in {:?}", rows_affected, elapsed);
-                        tab.status_message = Some(format!(
-                            "[{}] {} row(s) affected in {:.2?}",
-                            timestamp, rows_affected, elapsed
-                        ));
-                        should_refresh = true;
-                    }
-                }
-            }
-            Err(e) => {
-                debug_log!("Query error on database '{}': {}", db_name, e);
-                tab.query_result = None;
-                tab.status_message = Some(format!("Error [{}]: {}", db_name, e));
-            }
-        }
-
-        if should_refresh {
-            self.refresh_databases();
-        }
+        self.pending_operation = Some(PendingOperation::Query {
+            receiver: rx,
+            db_name,
+            start,
+        });
     }
 
     pub(super) fn refresh_databases(&mut self) {
