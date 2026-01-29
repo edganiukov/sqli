@@ -2,9 +2,7 @@ use crate::controller::{DatabaseConn, DatabaseType};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use std::io;
 use std::path::PathBuf;
-use std::process::Command;
 
 #[derive(Debug, Deserialize)]
 pub struct ConnectionConfig {
@@ -26,16 +24,6 @@ pub struct ConnectionConfig {
 }
 
 impl ConnectionConfig {
-    pub fn resolve_password(&self) -> String {
-        if let Some(ref cmd) = self.password_cmd {
-            match run_password_command(cmd) {
-                Ok(pwd) => return pwd,
-                Err(e) => eprintln!("Failed to run password_cmd: {}", e),
-            }
-        }
-        self.password.clone().unwrap_or_default()
-    }
-
     pub fn to_database_conn(&self, name: &str) -> Option<DatabaseConn> {
         let db_type = match self.db_type.to_lowercase().as_str() {
             "postgres" | "postgresql" => DatabaseType::Postgres,
@@ -51,28 +39,12 @@ impl ConnectionConfig {
             host: self.host.clone(),
             port: self.port,
             user: self.user.clone(),
-            password: self.resolve_password(),
+            password: self.password.clone(),
+            password_cmd: self.password_cmd.clone(),
             tls: self.tls,
             readonly: self.readonly,
         })
     }
-}
-
-fn run_password_command(cmd: &str) -> io::Result<String> {
-    let output = if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", cmd]).output()?
-    } else {
-        Command::new("sh").args(["-c", cmd]).output()?
-    };
-
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "Command failed with status: {}",
-            output.status
-        )));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 pub fn load_config(custom_path: Option<PathBuf>, debug: bool) -> Vec<DatabaseConn> {
@@ -171,7 +143,8 @@ fn default_connections() -> Vec<DatabaseConn> {
         host: "localhost".to_string(),
         port: 5432,
         user: "postgres".to_string(),
-        password: String::new(),
+        password: None,
+        password_cmd: None,
         tls: false,
         readonly: false,
     }]

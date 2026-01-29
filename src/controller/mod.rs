@@ -10,10 +10,29 @@ use std::collections::HashMap;
 use tokio::runtime::Runtime;
 use tui_textarea::TextArea;
 
+use std::process::Command;
+
 use crate::cassandra::CassandraClient;
 use crate::clickhouse::ClickHouseClient;
 use crate::mysql::MySqlClient;
 use crate::postgres::PostgresClient;
+
+fn run_password_command(cmd: &str) -> std::io::Result<String> {
+    let output = if cfg!(target_os = "windows") {
+        Command::new("cmd").args(["/C", cmd]).output()?
+    } else {
+        Command::new("sh").args(["-c", cmd]).output()?
+    };
+
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "Command failed with status: {}",
+            output.status
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Mode {
@@ -92,20 +111,35 @@ pub struct DatabaseConn {
     pub host: String,
     pub port: u16,
     pub user: String,
-    pub password: String,
+    pub password: Option<String>,
+    pub password_cmd: Option<String>,
     pub tls: bool,
     pub readonly: bool,
 }
 
 impl DatabaseConn {
+    pub fn resolve_password(&self) -> String {
+        if let Some(ref cmd) = self.password_cmd {
+            match run_password_command(cmd) {
+                Ok(pwd) => return pwd,
+                Err(e) => {
+                    crate::debug_log!("Failed to run password_cmd: {}", e);
+                    eprintln!("Failed to run password_cmd: {}", e);
+                }
+            }
+        }
+        self.password.clone().unwrap_or_default()
+    }
+
     pub async fn create_client(&self, database: &str) -> Result<DatabaseClient> {
+        let password = self.resolve_password();
         match self.db_type {
             DatabaseType::Postgres => {
                 let client = PostgresClient::connect(
                     &self.host,
                     self.port,
                     &self.user,
-                    &self.password,
+                    &password,
                     database,
                 )
                 .await?;
@@ -116,7 +150,7 @@ impl DatabaseConn {
                     &self.host,
                     self.port,
                     &self.user,
-                    &self.password,
+                    &password,
                     database,
                 )
                 .await?;
@@ -127,7 +161,7 @@ impl DatabaseConn {
                     &self.host,
                     self.port,
                     &self.user,
-                    &self.password,
+                    &password,
                     database,
                 )
                 .await?;
@@ -138,7 +172,7 @@ impl DatabaseConn {
                     &self.host,
                     self.port,
                     &self.user,
-                    &self.password,
+                    &password,
                     database,
                     self.tls,
                 )
