@@ -361,6 +361,16 @@ impl App {
         let mut list_state = ListState::default();
         list_state.select(Some(tab.sidebar.selected));
 
+        // Calculate scroll offset to keep selection 3 lines from bottom with 1 line padding
+        let visible_height = area.height.saturating_sub(2) as usize; // subtract borders
+        let selected = tab.sidebar.selected;
+        let padding_bottom = 3;
+
+        if visible_height > 0 && selected + padding_bottom >= visible_height {
+            let offset = selected + padding_bottom - visible_height + 1;
+            *list_state.offset_mut() = offset;
+        }
+
         frame.render_stateful_widget(list, area, &mut list_state);
     }
 
