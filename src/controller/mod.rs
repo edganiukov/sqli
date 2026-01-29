@@ -7,6 +7,7 @@ use crate::db::{DatabaseClient, QueryResult};
 use crate::error::Result;
 use crate::templates::{Template, TemplateStore};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use tui_textarea::TextArea;
@@ -20,16 +21,16 @@ use crate::postgres::PostgresClient;
 
 pub enum PendingOperation {
     Connect {
-        receiver: oneshot::Receiver<Result<(DatabaseClient, Vec<String>)>>,
+        receiver: oneshot::Receiver<Result<(DatabaseClient, Vec<String>, String)>>,
         conn_name: String,
     },
     Query {
-        receiver: oneshot::Receiver<Result<QueryResult>>,
+        receiver: oneshot::Receiver<Result<(QueryResult, Option<DatabaseClient>)>>,
         db_name: String,
         start: std::time::Instant,
     },
     LoadTables {
-        receiver: oneshot::Receiver<Result<Vec<String>>>,
+        receiver: oneshot::Receiver<Result<(Vec<String>, Option<DatabaseClient>)>>,
         db_name: String,
     },
 }
@@ -220,7 +221,8 @@ pub struct Tab {
     pub connected_db: Option<String>,
     pub view_state: ViewState,
     pub focus: Focus,
-    pub db_client: Option<DatabaseClient>,
+    pub db_client: Option<Arc<DatabaseClient>>,
+    pub client_database: Option<String>, // which database db_client is connected to
     pub sidebar: SidebarState,
     pub databases: Vec<String>,
     pub current_database: Option<String>,
@@ -244,6 +246,7 @@ impl Tab {
             view_state: ViewState::ConnectionList,
             focus: Focus::Sidebar,
             db_client: None,
+            client_database: None,
             sidebar: SidebarState::default(),
             databases: Vec::new(),
             current_database: None,
@@ -381,11 +384,12 @@ impl Controller {
                         let tab = self.current_tab_mut();
                         tab.loading = false;
                         match result {
-                            Ok((client, dbs)) => {
+                            Ok((client, dbs, db_name)) => {
                                 crate::debug_log!("Found {} database(s)", dbs.len());
                                 tab.current_database = dbs.first().cloned();
                                 tab.databases = dbs;
-                                tab.db_client = Some(client);
+                                tab.db_client = Some(Arc::new(client));
+                                tab.client_database = Some(db_name);
                                 tab.rebuild_sidebar_items();
                                 tab.status_message = None;
                                 tab.view_state = ViewState::DatabaseView;
@@ -424,7 +428,12 @@ impl Controller {
                         let timestamp = Local::now().format("%H:%M:%S");
 
                         match result {
-                            Ok(query_result) => {
+                            Ok((query_result, new_client)) => {
+                                // Cache new client if we created one
+                                if let Some(client) = new_client {
+                                    tab.db_client = Some(Arc::new(client));
+                                    tab.client_database = Some(db_name.clone());
+                                }
                                 tab.query_result = Some(query_result.clone());
                                 match &query_result {
                                     QueryResult::Select { rows, .. } => {
@@ -483,7 +492,12 @@ impl Controller {
                         let tab = self.current_tab_mut();
                         tab.loading = false;
                         match result {
-                            Ok(tables) => {
+                            Ok((tables, new_client)) => {
+                                // Cache new client if we created one
+                                if let Some(client) = new_client {
+                                    tab.db_client = Some(Arc::new(client));
+                                    tab.client_database = Some(db_name.clone());
+                                }
                                 crate::debug_log!(
                                     "Loaded {} table(s) for database '{}'",
                                     tables.len(),

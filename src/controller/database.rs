@@ -33,7 +33,7 @@ impl Controller {
             let result = async {
                 let client = conn.create_client(&db_name).await?;
                 let dbs = client.list_databases(include_system).await?;
-                Ok((client, dbs))
+                Ok((client, dbs, db_name))
             }
             .await;
             let _ = tx.send(result);
@@ -75,6 +75,16 @@ impl Controller {
             _ => db_name.clone(),
         };
 
+        // Check if we can reuse existing client
+        let existing_client = {
+            let tab = self.current_tab();
+            if tab.client_database.as_ref() == Some(&connect_db) {
+                tab.db_client.clone()
+            } else {
+                None
+            }
+        };
+
         let tab = self.current_tab_mut();
         tab.loading = true;
         tab.status_message = Some("Loading tables...".to_string());
@@ -83,8 +93,14 @@ impl Controller {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
             let result = async {
-                let client = conn.create_client(&connect_db).await?;
-                client.list_tables(&schema).await
+                if let Some(client) = existing_client {
+                    let tables = client.list_tables(&schema).await?;
+                    Ok((tables, None))
+                } else {
+                    let client = conn.create_client(&connect_db).await?;
+                    let tables = client.list_tables(&schema).await?;
+                    Ok((tables, Some(client)))
+                }
             }
             .await;
             let _ = tx.send(result);
@@ -124,9 +140,18 @@ impl Controller {
             None => (conn.db_type.default_database().to_string(), true),
         };
 
+        // Determine connection database (differs from query database for some DB types)
+        // - Cassandra: always connect without keyspace, USE keyspace in queries
+        // - Others: connect to specific database
+        let connect_db = match conn.db_type {
+            DatabaseType::Cassandra => String::new(),
+            _ => db_name.clone(),
+        };
+
         debug_log!(
-            "Executing query on database '{}' (host: {}:{}): {}",
+            "Executing query on database '{}' (connect_db: '{}', host: {}:{}): {}",
             db_name,
+            connect_db,
             conn.host,
             conn.port,
             query.trim().replace('\n', " ")
@@ -148,13 +173,29 @@ impl Controller {
         }
 
         let start = std::time::Instant::now();
-        let db_name_clone = db_name.clone();
+        let connect_db_clone = connect_db.clone();
+
+        // Check if we can reuse existing client (compare against connect_db, not db_name)
+        let existing_client = {
+            let tab = self.current_tab();
+            if tab.client_database.as_ref() == Some(&connect_db) {
+                tab.db_client.clone()
+            } else {
+                None
+            }
+        };
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
             let result = async {
-                let client = conn.create_client(&db_name_clone).await?;
-                client.execute_query(&query).await
+                if let Some(client) = existing_client {
+                    let res = client.execute_query(&query).await?;
+                    Ok((res, None))
+                } else {
+                    let client = conn.create_client(&connect_db_clone).await?;
+                    let res = client.execute_query(&query).await?;
+                    Ok((res, Some(client)))
+                }
             }
             .await;
             let _ = tx.send(result);
@@ -162,7 +203,7 @@ impl Controller {
 
         self.pending_operation = Some(PendingOperation::Query {
             receiver: rx,
-            db_name,
+            db_name: connect_db, // Track the connection database, not query database
             start,
         });
     }
@@ -179,9 +220,23 @@ impl Controller {
         let include_system = self.current_tab().show_system_databases;
         let db_name = conn.db_type.default_database().to_string();
 
+        // Try to reuse existing client
+        let existing_client = {
+            let tab = self.current_tab();
+            if tab.client_database.as_ref() == Some(&db_name) {
+                tab.db_client.clone()
+            } else {
+                None
+            }
+        };
+
         let result = self.runtime.block_on(async {
-            let client = conn.create_client(&db_name).await?;
-            client.list_databases(include_system).await
+            if let Some(client) = existing_client {
+                client.list_databases(include_system).await
+            } else {
+                let client = conn.create_client(&db_name).await?;
+                client.list_databases(include_system).await
+            }
         });
 
         let tab = self.current_tab_mut();
