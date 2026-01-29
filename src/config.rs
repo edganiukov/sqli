@@ -1,6 +1,6 @@
 use crate::controller::{DatabaseConn, DatabaseType};
+use indexmap::IndexMap;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -62,10 +62,10 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
 
     match config_path {
         Some(path) => match fs::read_to_string(&path) {
-            Ok(content) => match toml::from_str::<HashMap<String, ConnectionConfig>>(&content) {
+            Ok(content) => match toml::from_str::<IndexMap<String, ConnectionConfig>>(&content) {
                 Ok(configs) => {
                     debug_log!("Parsed {} connection(s) from config", configs.len());
-                    let mut connections: Vec<DatabaseConn> = configs
+                    let connections: Vec<DatabaseConn> = configs
                         .iter()
                         .filter_map(|(name, config)| {
                             let conn = config.to_database_conn(name);
@@ -79,7 +79,6 @@ pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
                             conn
                         })
                         .collect();
-                    connections.sort_by(|a, b| a.name.cmp(&b.name));
                     if connections.is_empty() {
                         debug_log!("No valid connections found, using defaults");
                         default_connections()
