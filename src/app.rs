@@ -364,7 +364,7 @@ impl App {
         // Calculate scroll offset to keep selection 3 lines from bottom with 1 line padding
         let visible_height = area.height.saturating_sub(2) as usize; // subtract borders
         let selected = tab.sidebar.selected;
-        let padding_bottom = 3;
+        let padding_bottom = 1;
 
         if visible_height > 0 && selected + padding_bottom >= visible_height {
             let offset = selected + padding_bottom - visible_height + 1;
@@ -443,7 +443,8 @@ impl App {
 
                     let header_cells = columns.iter().zip(col_widths.iter()).map(|(h, &w)| {
                         let text = truncate_str(h, w.saturating_sub(1));
-                        Cell::from(text).style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
+                        Cell::from(text)
+                            .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
                     });
                     let header =
                         Row::new(header_cells).height(1).style(Style::default().bg(SURFACE_LIGHT));
@@ -705,7 +706,10 @@ impl App {
                 lines.push(Line::from(vec![
                     Span::styled(field_name, Style::default().fg(WARNING)),
                     Span::styled(" : ", Style::default().fg(TEXT_DIM)),
-                    Span::styled("(empty)", Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)),
+                    Span::styled(
+                        "(empty)",
+                        Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC),
+                    ),
                 ]));
             } else {
                 // Wrap long values
@@ -749,10 +753,20 @@ impl App {
         if total_lines > visible_lines {
             let h = inner.height as usize;
             let thumb_h = (h * visible_lines / total_lines).max(1);
-            let thumb_pos = if max_scroll > 0 { actual_scroll * (h - thumb_h) / max_scroll } else { 0 };
+            let thumb_pos = if max_scroll > 0 {
+                actual_scroll * (h - thumb_h) / max_scroll
+            } else {
+                0
+            };
 
             let scrollbar: String = (0..h)
-                .map(|i| if i >= thumb_pos && i < thumb_pos + thumb_h { "█" } else { "░" })
+                .map(|i| {
+                    if i >= thumb_pos && i < thumb_pos + thumb_h {
+                        "█"
+                    } else {
+                        "░"
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -785,7 +799,11 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 
         let mut current = String::new();
         for word in line.split_whitespace() {
-            let needed = if current.is_empty() { word.len() } else { current.len() + 1 + word.len() };
+            let needed = if current.is_empty() {
+                word.len()
+            } else {
+                current.len() + 1 + word.len()
+            };
 
             if needed <= max_width {
                 if !current.is_empty() {
