@@ -49,12 +49,12 @@ impl DatabaseClient {
     }
 
     /// Generate a SELECT query for previewing table contents
-    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
+    pub fn select_table_query(&self, table: &str, limit: usize, schema: Option<&str>) -> String {
         match self {
-            DatabaseClient::Postgres(client) => client.select_table_query(table, limit),
-            DatabaseClient::MySql(client) => client.select_table_query(table, limit),
-            DatabaseClient::Cassandra(client) => client.select_table_query(table, limit),
-            DatabaseClient::ClickHouse(client) => client.select_table_query(table, limit),
+            DatabaseClient::Postgres(client) => client.select_table_query(table, limit, schema),
+            DatabaseClient::MySql(client) => client.select_table_query(table, limit, schema),
+            DatabaseClient::Cassandra(client) => client.select_table_query(table, limit, schema),
+            DatabaseClient::ClickHouse(client) => client.select_table_query(table, limit, schema),
         }
     }
 

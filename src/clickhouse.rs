@@ -151,7 +151,7 @@ impl ClickHouseClient {
         }
     }
 
-    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
+    pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
         format!("SELECT * FROM {} LIMIT {}", table, limit)
     }
 

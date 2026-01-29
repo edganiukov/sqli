@@ -111,7 +111,7 @@ impl PostgresClient {
         }
     }
 
-    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
+    pub fn select_table_query(&self, table: &str, limit: usize, _schema: Option<&str>) -> String {
         format!("SELECT * FROM \"{}\" LIMIT {};", table, limit)
     }
 

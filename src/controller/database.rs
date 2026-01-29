@@ -302,7 +302,7 @@ impl Controller {
                     .current_tab()
                     .db_client
                     .as_ref()
-                    .map(|c| c.select_table_query(&table, 50))
+                    .map(|c| c.select_table_query(&table, 50, Some(&database)))
                     .unwrap_or_default();
                 debug_log!("Generated query: {}", query);
                 self.query_textarea.select_all();

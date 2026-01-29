@@ -129,8 +129,11 @@ impl CassandraClient {
         }
     }
 
-    pub fn select_table_query(&self, table: &str, limit: usize) -> String {
-        format!("SELECT * FROM {} LIMIT {};", table, limit)
+    pub fn select_table_query(&self, table: &str, limit: usize, keyspace: Option<&str>) -> String {
+        match keyspace {
+            Some(ks) => format!("SELECT * FROM {}.{} LIMIT {};", ks, table, limit),
+            None => format!("SELECT * FROM {} LIMIT {};", table, limit),
+        }
     }
 
     pub fn describe_table_query(&self, table: &str, keyspace: Option<&str>) -> String {
