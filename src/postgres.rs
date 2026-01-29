@@ -17,6 +17,13 @@ impl PostgresClient {
         password: &str,
         database: &str,
     ) -> Result<Self> {
+        crate::debug_log!(
+            "Postgres connecting to {}:{} database='{}' user='{}'",
+            host,
+            port,
+            database,
+            user
+        );
         let conn_string = format!(
             "host={} port={} user={} password={} dbname={}",
             host, port, user, password, database
@@ -51,6 +58,7 @@ impl PostgresClient {
     }
 
     pub async fn list_tables(&self, schema: &str) -> Result<Vec<String>> {
+        crate::debug_log!("Postgres listing tables for schema '{}'", schema);
         let rows = self
             .client
             .query(
@@ -59,10 +67,13 @@ impl PostgresClient {
             )
             .await?;
 
-        Ok(rows.iter().map(|row| row.get(0)).collect())
+        let tables: Vec<String> = rows.iter().map(|row| row.get(0)).collect();
+        crate::debug_log!("Found {} tables: {:?}", tables.len(), tables);
+        Ok(tables)
     }
 
     pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
+        crate::debug_log!("Postgres executing: {}", query.trim().replace('\n', " "));
         let query_upper = query.trim().to_uppercase();
 
         if query_upper.starts_with("SELECT") || query_upper.starts_with("WITH") {
@@ -101,14 +112,14 @@ impl PostgresClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize) -> String {
-        format!("SELECT * FROM {} LIMIT {};", table, limit)
+        format!("SELECT * FROM public.\"{}\" LIMIT {};", table, limit)
     }
 
     pub fn describe_table_query(&self, table: &str, _schema: Option<&str>) -> String {
         format!(
             "SELECT column_name, data_type, is_nullable, column_default \n\
              FROM information_schema.columns \n\
-             WHERE table_name = '{}' \n\
+             WHERE table_schema = 'public' AND table_name = '{}' \n\
              ORDER BY ordinal_position;",
             table
         )

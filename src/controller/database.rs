@@ -138,8 +138,10 @@ impl Controller {
         };
 
         debug_log!(
-            "Executing query on database '{}': {}",
+            "Executing query on database '{}' (host: {}:{}): {}",
             db_name,
+            conn.host,
+            conn.port,
             query.trim().replace('\n', " ")
         );
 
@@ -190,9 +192,9 @@ impl Controller {
                 }
             }
             Err(e) => {
-                debug_log!("Query error: {}", e);
+                debug_log!("Query error on database '{}': {}", db_name, e);
                 tab.query_result = None;
-                tab.status_message = Some(format!("Error: [{}] {}", timestamp, e));
+                tab.status_message = Some(format!("Error [{}]: {}", db_name, e));
             }
         }
 
@@ -269,8 +271,13 @@ impl Controller {
                 self.current_tab_mut().rebuild_sidebar_items();
             }
             SidebarItem::Table { database, table } => {
+                debug_log!(
+                    "Selected table '{}' from database '{}'",
+                    table,
+                    database
+                );
                 // Set parent database as current
-                self.current_tab_mut().current_database = Some(database);
+                self.current_tab_mut().current_database = Some(database.clone());
                 // Populate query and execute
                 let query = self
                     .current_tab()
@@ -278,6 +285,7 @@ impl Controller {
                     .as_ref()
                     .map(|c| c.select_table_query(&table, 50))
                     .unwrap_or_default();
+                debug_log!("Generated query: {}", query);
                 self.query_textarea.select_all();
                 self.query_textarea.cut();
                 self.query_textarea.insert_str(&query);
