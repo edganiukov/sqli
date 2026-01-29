@@ -270,8 +270,7 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(config_path: Option<std::path::PathBuf>) -> Self {
-        let connections = crate::config::load_config(config_path);
+    pub fn with_connections(connections: Vec<DatabaseConn>) -> Self {
         let runtime = Runtime::new().expect("Failed to create tokio runtime");
         let template_store = TemplateStore::load();
 

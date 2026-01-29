@@ -35,8 +35,10 @@ struct Args {
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
+    // Load config before entering raw mode so errors are visible
+    let connections = config::load_config(args.config);
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, args.config);
+    let result = run(&mut terminal, connections);
     restore_terminal()?;
     result
 }
@@ -55,9 +57,9 @@ fn restore_terminal() -> io::Result<()> {
 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    config_path: Option<PathBuf>,
+    connections: Vec<controller::DatabaseConn>,
 ) -> io::Result<()> {
-    let controller = Controller::new(config_path);
+    let controller = Controller::with_connections(connections);
     let mut app = App::new(controller);
 
     loop {
