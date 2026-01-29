@@ -112,14 +112,14 @@ impl PostgresClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize) -> String {
-        format!("SELECT * FROM public.\"{}\" LIMIT {};", table, limit)
+        format!("SELECT * FROM \"{}\" LIMIT {};", table, limit)
     }
 
     pub fn describe_table_query(&self, table: &str, _schema: Option<&str>) -> String {
         format!(
             "SELECT column_name, data_type, is_nullable, column_default \n\
              FROM information_schema.columns \n\
-             WHERE table_schema = 'public' AND table_name = '{}' \n\
+             WHERE table_name = '{}' \n\
              ORDER BY ordinal_position;",
             table
         )
