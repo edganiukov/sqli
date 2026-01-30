@@ -194,12 +194,12 @@ mod tests {
     #[test]
     fn test_parse_templates() {
         let content = r#"--- Count Rows [global]
-SELECT COUNT(*) FROM <table>
+select count(*) from <table>
 
 --- Active Users [my-db]
-SELECT * FROM users
-WHERE active = true
-LIMIT <limit>
+select * from users
+where active = true
+limit <limit>
 "#;
 
         let templates = TemplateStore::parse(content);
@@ -207,14 +207,14 @@ LIMIT <limit>
 
         assert_eq!(templates[0].name, "Count Rows");
         assert_eq!(templates[0].scope, TemplateScope::Global);
-        assert_eq!(templates[0].query, "SELECT COUNT(*) FROM <table>");
+        assert_eq!(templates[0].query, "select count(*) from <table>");
 
         assert_eq!(templates[1].name, "Active Users");
         assert_eq!(
             templates[1].scope,
             TemplateScope::Connection("my-db".to_string())
         );
-        assert!(templates[1].query.contains("WHERE active = true"));
+        assert!(templates[1].query.contains("where active = true"));
     }
 
     #[test]
@@ -222,12 +222,12 @@ LIMIT <limit>
         let templates = vec![
             Template {
                 name: "Test".to_string(),
-                query: "SELECT 1".to_string(),
+                query: "select 1".to_string(),
                 scope: TemplateScope::Global,
             },
             Template {
                 name: "Local".to_string(),
-                query: "SELECT 2".to_string(),
+                query: "select 2".to_string(),
                 scope: TemplateScope::Connection("db".to_string()),
             },
         ];
@@ -239,15 +239,15 @@ LIMIT <limit>
 
     #[test]
     fn test_find_placeholder() {
-        let query = "SELECT * FROM <table> WHERE id = <id>";
+        let query = "select * from <table> where id = <id>";
         let result = find_placeholder(query);
         assert_eq!(result, Some((0, 14, 7))); // <table> starts at col 14, length 7
 
-        let multiline = "SELECT *\nFROM <table>";
+        let multiline = "select *\nfrom <table>";
         let result = find_placeholder(multiline);
         assert_eq!(result, Some((1, 5, 7))); // <table> on line 1
 
-        let no_placeholder = "SELECT * FROM users";
+        let no_placeholder = "select * from users";
         assert_eq!(find_placeholder(no_placeholder), None);
     }
 

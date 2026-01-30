@@ -203,7 +203,7 @@ impl Controller {
 
         if conn.readonly && !Self::is_read_query(query) {
             self.current_tab_mut().status_message =
-                Some("Connection is read-only, only SELECT queries allowed".to_string());
+                Some("Connection is read-only, only select queries allowed".to_string());
             return;
         }
 

@@ -31,7 +31,7 @@ impl CassandraClient {
         // Use keyspace if provided
         if !keyspace.is_empty() {
             session
-                .query_unpaged(format!("USE {}", keyspace), &[])
+                .query_unpaged(format!("use {}", keyspace), &[])
                 .await?;
         }
 
@@ -43,7 +43,7 @@ impl CassandraClient {
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         let rows = self
             .session
-            .query_unpaged("SELECT keyspace_name FROM system_schema.keyspaces", &[])
+            .query_unpaged("select keyspace_name from system_schema.keyspaces", &[])
             .await?;
 
         const SYSTEM_KEYSPACES: &[&str] = &[
@@ -76,7 +76,7 @@ impl CassandraClient {
         let rows = self
             .session
             .query_unpaged(
-                "SELECT keyspace_name, table_name FROM system_schema.tables",
+                "select keyspace_name, table_name from system_schema.tables",
                 &[],
             )
             .await?;
@@ -131,23 +131,23 @@ impl CassandraClient {
 
     pub fn select_table_query(&self, table: &str, limit: usize, keyspace: Option<&str>) -> String {
         match keyspace {
-            Some(ks) => format!("SELECT * FROM {}.{} LIMIT {};", ks, table, limit),
-            None => format!("SELECT * FROM {} LIMIT {};", table, limit),
+            Some(ks) => format!("select * from {}.{} limit {};", ks, table, limit),
+            None => format!("select * from {} limit {};", table, limit),
         }
     }
 
     pub fn describe_table_query(&self, table: &str, keyspace: Option<&str>) -> String {
         match keyspace {
             Some(ks) => format!(
-                "SELECT column_name, type, kind \n\
-                 FROM system_schema.columns \n\
-                 WHERE keyspace_name = '{}' AND table_name = '{}';",
+                "select column_name, type, kind \n\
+                 from system_schema.columns \n\
+                 where keyspace_name = '{}' and table_name = '{}';",
                 ks, table
             ),
             None => format!(
-                "SELECT column_name, type, kind \n\
-                 FROM system_schema.columns \n\
-                 WHERE table_name = '{}';",
+                "select column_name, type, kind \n\
+                 from system_schema.columns \n\
+                 where table_name = '{}';",
                 table
             ),
         }
