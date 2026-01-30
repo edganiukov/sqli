@@ -18,10 +18,29 @@ impl Controller {
 
     /// Cancel any pending async operation. Returns true if something was cancelled.
     fn cancel_pending_operation(&mut self) -> bool {
-        if self.pending_operation.take().is_some() {
+        if let Some(op) = self.pending_operation.take() {
             let tab = self.current_tab_mut();
             tab.loading = false;
             tab.status_message = Some("Cancelled".to_string());
+
+            // Reset view state based on what operation was cancelled
+            match op {
+                super::PendingOperation::ListDatabases { .. } => {
+                    // Was connecting, go back to connection list
+                    tab.view_state = ViewState::ConnectionList;
+                    tab.name = "New".to_string();
+                }
+                super::PendingOperation::Connect { .. } => {
+                    // Was connecting to specific DB, go back to connection list
+                    tab.view_state = ViewState::ConnectionList;
+                    tab.name = "New".to_string();
+                    tab.databases.clear();
+                }
+                super::PendingOperation::Query { .. }
+                | super::PendingOperation::RefreshTables { .. } => {
+                    // Stay in database view, just cancel the operation
+                }
+            }
             true
         } else {
             false
@@ -33,6 +52,9 @@ impl Controller {
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
+            }
+            KeyCode::Char('q') => {
+                self.close_current_tab();
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.current_tab_mut().select_next();
@@ -55,6 +77,9 @@ impl Controller {
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
+            }
+            KeyCode::Char('q') => {
+                self.close_current_tab();
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.current_tab_mut().database_next();
