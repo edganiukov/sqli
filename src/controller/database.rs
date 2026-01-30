@@ -124,10 +124,7 @@ impl Controller {
         let db_name_clone = db_name.clone();
 
         // Determine connection database and schema for listing tables
-        let connect_db = match conn.db_type {
-            DatabaseType::Cassandra => String::new(),
-            _ => db_name.clone(),
-        };
+        let connect_db = db_name.clone();
         let schema = match conn.db_type {
             DatabaseType::Postgres => "public".to_string(),
             _ => db_name.clone(),
