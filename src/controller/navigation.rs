@@ -117,4 +117,50 @@ impl Controller {
             };
         }
     }
+
+    /// Calculate max horizontal scroll based on column widths
+    fn calc_max_h_scroll(&self) -> usize {
+        let tab = self.current_tab();
+        if let Some(QueryResult::Select { columns, rows }) = &tab.query_result {
+            const MIN_COL_WIDTH: usize = 12;
+            const MAX_COL_WIDTH: usize = 50;
+
+            // Calculate column widths (same logic as rendering)
+            let mut col_widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
+            for row in rows.iter() {
+                for (i, cell) in row.iter().enumerate() {
+                    if i < col_widths.len() {
+                        col_widths[i] = col_widths[i].max(cell.len());
+                    }
+                }
+            }
+            for w in col_widths.iter_mut() {
+                *w = (*w + 2).clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
+            }
+
+            let total_width: usize = col_widths.iter().sum();
+            // Assume ~80 chars visible width as approximation (actual width set during render)
+            // This is a reasonable default; the render will clamp if needed
+            let available_width = 80;
+            total_width.saturating_sub(available_width)
+        } else {
+            0
+        }
+    }
+
+    pub(super) fn scroll_horizontal(&mut self, delta: i32) {
+        let max_scroll = self.calc_max_h_scroll();
+        let tab = self.current_tab_mut();
+
+        if delta > 0 {
+            tab.result_h_scroll = (tab.result_h_scroll + delta as usize).min(max_scroll);
+        } else {
+            tab.result_h_scroll = tab.result_h_scroll.saturating_sub((-delta) as usize);
+        }
+    }
+
+    pub(super) fn scroll_horizontal_to_end(&mut self) {
+        let max_scroll = self.calc_max_h_scroll();
+        self.current_tab_mut().result_h_scroll = max_scroll;
+    }
 }
