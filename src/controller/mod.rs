@@ -396,7 +396,7 @@ impl Controller {
                             tab.sidebar.selected = 0;
                             tab.status_message = None;
                             tab.view_state = ViewState::DatabaseView;
-                            tab.focus = Focus::Sidebar;
+                            tab.focus = Focus::Query;
                         }
                         Err(e) => {
                             crate::debug_log!("Connection failed: {}", e);
