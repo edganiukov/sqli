@@ -30,10 +30,10 @@ impl Controller {
     fn cancel_pending_operation(&mut self) -> bool {
         if let Some(op) = self.pending_operation.take() {
             crate::debug_log!("Cancelling operation: {:?}", std::mem::discriminant(&op));
-            
+
             // Reset any pending flags
             self.pending_escape = false;
-            
+
             let tab = self.current_tab_mut();
             tab.loading = false;
             tab.pending_g = false;

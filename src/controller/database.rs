@@ -1,8 +1,12 @@
 use super::{Controller, DatabaseType, Focus, PendingOperation};
 use crate::debug_log;
+use crate::error::SqliError;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tui_textarea::TextArea;
+
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl Controller {
     /// Step 1: User selects a connection - either connect directly (if database configured)
@@ -39,11 +43,12 @@ impl Controller {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
             let db_name = conn.db_type.default_database().to_string();
-            let result = async {
+            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
                 let client = conn.create_client(&db_name).await?;
                 client.list_databases(include_system).await
-            }
-            .await;
+            })
+            .await
+            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
             let _ = tx.send(result);
         });
 
@@ -98,12 +103,13 @@ impl Controller {
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let result = async {
+            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
                 let client = conn.create_client(&connect_db).await?;
                 let tables = client.list_tables(&schema).await?;
                 Ok((client, tables))
-            }
-            .await;
+            })
+            .await
+            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
             let _ = tx.send(result);
         });
 
@@ -202,7 +208,9 @@ impl Controller {
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let result = client.list_tables(&schema).await;
+            let result = tokio::time::timeout(CONNECTION_TIMEOUT, client.list_tables(&schema))
+                .await
+                .unwrap_or_else(|_| Err(SqliError::Query("Refresh timed out".to_string())));
             let _ = tx.send(result);
         });
 
