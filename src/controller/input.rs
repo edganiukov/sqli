@@ -361,18 +361,19 @@ impl Controller {
 
     fn toggle_system_databases(&mut self) {
         let tab = self.current_tab_mut();
+        if tab.view_state != ViewState::DatabaseList {
+            return;
+        }
+
         tab.show_system_databases = !tab.show_system_databases;
         let show = tab.show_system_databases;
 
-        // Only refresh if we have a db_client
-        if tab.db_client.is_some() {
-            self.refresh_tables();
-            let msg = if show {
-                "Showing system tables"
-            } else {
-                "Hiding system tables"
-            };
-            self.current_tab_mut().status_message = Some(msg.to_string());
-        }
+        self.refresh_database_list();
+        let msg = if show {
+            "Showing system databases"
+        } else {
+            "Hiding system databases"
+        };
+        self.current_tab_mut().status_message = Some(msg.to_string());
     }
 }

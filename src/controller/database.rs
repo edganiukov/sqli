@@ -58,6 +58,38 @@ impl Controller {
         });
     }
 
+    /// Refresh the database list (used when toggling system databases)
+    pub(super) fn refresh_database_list(&mut self) {
+        let tab = self.current_tab_mut();
+        let conn = match tab.connections.get(tab.selected_index) {
+            Some(c) => c.clone(),
+            None => return,
+        };
+
+        tab.status_message = Some("Refreshing...".to_string());
+        tab.loading = true;
+
+        let include_system = tab.show_system_databases;
+        let conn_name = conn.name.clone();
+
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let db_name = conn.db_type.default_database().to_string();
+            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
+                let client = conn.create_client(&db_name).await?;
+                client.list_databases(include_system).await
+            })
+            .await
+            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
+            let _ = tx.send(result);
+        });
+
+        self.pending_operation = Some(PendingOperation::ListDatabases {
+            receiver: rx,
+            conn_name,
+        });
+    }
+
     /// Step 2: User selects a database from list - connect and load tables
     pub(super) fn connect_to_selected_database_from_list(&mut self) {
         let tab = self.current_tab();
