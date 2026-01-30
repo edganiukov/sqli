@@ -1,5 +1,4 @@
 use super::{Controller, Focus, Mode, PopupState, ViewState};
-use chrono::Local;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl Controller {
@@ -7,6 +6,7 @@ impl Controller {
         let view_state = self.current_tab().view_state;
         match view_state {
             ViewState::ConnectionList => self.handle_connection_list_keys(key_event.code),
+            ViewState::DatabaseList => self.handle_database_list_keys(key_event.code),
             ViewState::DatabaseView => self.handle_database_view_keys(key_event),
         }
     }
@@ -27,7 +27,33 @@ impl Controller {
                 self.new_tab();
             }
             KeyCode::Enter => {
-                self.connect_to_database();
+                self.initiate_connection();
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_database_list_keys(&mut self, key_code: KeyCode) {
+        match key_code {
+            KeyCode::Char(':') => {
+                self.mode = Mode::Command;
+                self.command_buffer.clear();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.current_tab_mut().database_next();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.current_tab_mut().database_prev();
+            }
+            KeyCode::Esc => {
+                // Go back to connection list
+                let tab = self.current_tab_mut();
+                tab.view_state = ViewState::ConnectionList;
+                tab.name = "New".to_string();
+                tab.databases.clear();
+            }
+            KeyCode::Enter => {
+                self.connect_to_selected_database_from_list();
             }
             _ => {}
         }
@@ -87,15 +113,13 @@ impl Controller {
                 self.current_tab_mut().focus = Focus::Query;
             }
             KeyCode::Enter => {
-                self.toggle_sidebar_item();
+                self.select_table();
             }
             KeyCode::Char('d') => {
                 self.describe_table();
             }
             KeyCode::Char('r') => {
-                self.refresh_databases();
-                let timestamp = Local::now().format("%H:%M:%S");
-                self.current_tab_mut().status_message = Some(format!("[{}] Refreshed", timestamp));
+                self.refresh_tables();
             }
             KeyCode::F(5) => {
                 self.execute_query();
@@ -309,11 +333,11 @@ impl Controller {
 
         // Only refresh if we have a db_client
         if tab.db_client.is_some() {
-            self.refresh_databases();
+            self.refresh_tables();
             let msg = if show {
-                "Showing system databases"
+                "Showing system tables"
             } else {
-                "Hiding system databases"
+                "Hiding system tables"
             };
             self.current_tab_mut().status_message = Some(msg.to_string());
         }

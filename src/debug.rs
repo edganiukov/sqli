@@ -6,8 +6,7 @@ use std::sync::Mutex;
 use chrono::Local;
 
 static DEBUG_LOG: Mutex<Option<File>> = Mutex::new(None);
-static DEBUG_ENABLED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static DEBUG_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn init(enabled: bool) {
     DEBUG_ENABLED.store(enabled, std::sync::atomic::Ordering::SeqCst);
@@ -18,11 +17,7 @@ pub fn init(enabled: bool) {
 
     let log_path = PathBuf::from("/tmp/sqli.log");
 
-    match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    {
+    match OpenOptions::new().create(true).append(true).open(&log_path) {
         Ok(mut file) => {
             let _ = writeln!(
                 file,

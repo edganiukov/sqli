@@ -6,7 +6,6 @@ mod templates;
 use crate::db::{DatabaseClient, QueryResult};
 use crate::error::Result;
 use crate::templates::{Template, TemplateStore};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -20,18 +19,21 @@ use crate::mysql::MySqlClient;
 use crate::postgres::PostgresClient;
 
 pub enum PendingOperation {
-    Connect {
-        receiver: oneshot::Receiver<Result<(DatabaseClient, Vec<String>, String)>>,
+    ListDatabases {
+        receiver: oneshot::Receiver<Result<Vec<String>>>,
         conn_name: String,
     },
-    Query {
-        receiver: oneshot::Receiver<Result<(QueryResult, Option<DatabaseClient>)>>,
+    Connect {
+        receiver: oneshot::Receiver<Result<(DatabaseClient, Vec<String>)>>,
+        conn_name: String,
         db_name: String,
+    },
+    Query {
+        receiver: oneshot::Receiver<Result<QueryResult>>,
         start: std::time::Instant,
     },
-    LoadTables {
-        receiver: oneshot::Receiver<Result<(Vec<String>, Option<DatabaseClient>)>>,
-        db_name: String,
+    RefreshTables {
+        receiver: oneshot::Receiver<Result<Vec<String>>>,
     },
 }
 
@@ -61,6 +63,7 @@ pub enum Mode {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ViewState {
     ConnectionList,
+    DatabaseList,
     DatabaseView,
 }
 
@@ -152,46 +155,27 @@ impl DatabaseConn {
         let password = self.resolve_password();
         match self.db_type {
             DatabaseType::Postgres => {
-                let client = PostgresClient::connect(
-                    &self.host,
-                    self.port,
-                    &self.user,
-                    &password,
-                    database,
-                )
-                .await?;
+                let client =
+                    PostgresClient::connect(&self.host, self.port, &self.user, &password, database)
+                        .await?;
                 Ok(DatabaseClient::Postgres(client))
             }
             DatabaseType::MySql => {
-                let client = MySqlClient::connect(
-                    &self.host,
-                    self.port,
-                    &self.user,
-                    &password,
-                    database,
-                )
-                .await?;
+                let client =
+                    MySqlClient::connect(&self.host, self.port, &self.user, &password, database)
+                        .await?;
                 Ok(DatabaseClient::MySql(client))
             }
             DatabaseType::Cassandra => {
                 let client = CassandraClient::connect(
-                    &self.host,
-                    self.port,
-                    &self.user,
-                    &password,
-                    database,
+                    &self.host, self.port, &self.user, &password, database,
                 )
                 .await?;
                 Ok(DatabaseClient::Cassandra(client))
             }
             DatabaseType::ClickHouse => {
                 let client = ClickHouseClient::connect(
-                    &self.host,
-                    self.port,
-                    &self.user,
-                    &password,
-                    database,
-                    self.tls,
+                    &self.host, self.port, &self.user, &password, database, self.tls,
                 )
                 .await?;
                 Ok(DatabaseClient::ClickHouse(client))
@@ -200,32 +184,23 @@ impl DatabaseConn {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SidebarItem {
-    Database(String),
-    Table { database: String, table: String },
-}
-
 #[derive(Debug, Default)]
 pub struct SidebarState {
-    pub items: Vec<SidebarItem>,
+    pub tables: Vec<String>,
     pub selected: usize,
-    pub expanded: std::collections::HashSet<String>,
-    pub tables: HashMap<String, Vec<String>>,
 }
 
 pub struct Tab {
     pub name: String,
     pub connections: Vec<DatabaseConn>,
     pub selected_index: usize,
-    pub connected_db: Option<String>,
     pub view_state: ViewState,
     pub focus: Focus,
     pub db_client: Option<Arc<DatabaseClient>>,
-    pub client_database: Option<String>, // which database db_client is connected to
+    pub current_database: Option<String>, // the selected database we're connected to
+    pub databases: Vec<String>,           // list of databases for DatabaseList view
+    pub database_selected: usize,         // selected index in database list
     pub sidebar: SidebarState,
-    pub databases: Vec<String>,
-    pub current_database: Option<String>,
     pub query_result: Option<QueryResult>,
     pub result_scroll: usize,
     pub result_cursor: usize,
@@ -242,14 +217,13 @@ impl Tab {
             name: "New".to_string(),
             connections,
             selected_index: 0,
-            connected_db: None,
             view_state: ViewState::ConnectionList,
             focus: Focus::Sidebar,
             db_client: None,
-            client_database: None,
-            sidebar: SidebarState::default(),
-            databases: Vec::new(),
             current_database: None,
+            databases: Vec::new(),
+            database_selected: 0,
+            sidebar: SidebarState::default(),
             query_result: None,
             result_scroll: 0,
             result_cursor: 0,
@@ -277,35 +251,34 @@ impl Tab {
         }
     }
 
-    pub fn rebuild_sidebar_items(&mut self) {
-        self.sidebar.items.clear();
-        for db in &self.databases {
-            self.sidebar.items.push(SidebarItem::Database(db.clone()));
-            if self.sidebar.expanded.contains(db)
-                && let Some(tables) = self.sidebar.tables.get(db)
-            {
-                for table in tables {
-                    self.sidebar.items.push(SidebarItem::Table {
-                        database: db.clone(),
-                        table: table.clone(),
-                    });
-                }
-            }
-        }
-    }
-
     pub fn sidebar_next(&mut self) {
-        if !self.sidebar.items.is_empty() {
-            self.sidebar.selected = (self.sidebar.selected + 1) % self.sidebar.items.len();
+        if !self.sidebar.tables.is_empty() {
+            self.sidebar.selected = (self.sidebar.selected + 1) % self.sidebar.tables.len();
         }
     }
 
     pub fn sidebar_prev(&mut self) {
-        if !self.sidebar.items.is_empty() {
+        if !self.sidebar.tables.is_empty() {
             if self.sidebar.selected == 0 {
-                self.sidebar.selected = self.sidebar.items.len() - 1;
+                self.sidebar.selected = self.sidebar.tables.len() - 1;
             } else {
                 self.sidebar.selected -= 1;
+            }
+        }
+    }
+
+    pub fn database_next(&mut self) {
+        if !self.databases.is_empty() {
+            self.database_selected = (self.database_selected + 1) % self.databases.len();
+        }
+    }
+
+    pub fn database_prev(&mut self) {
+        if !self.databases.is_empty() {
+            if self.database_selected == 0 {
+                self.database_selected = self.databases.len() - 1;
+            } else {
+                self.database_selected -= 1;
             }
         }
     }
@@ -378,156 +351,172 @@ impl Controller {
         };
 
         match op {
-            PendingOperation::Connect { mut receiver, conn_name } => {
-                match receiver.try_recv() {
-                    Ok(result) => {
-                        let tab = self.current_tab_mut();
-                        tab.loading = false;
-                        match result {
-                            Ok((client, dbs, db_name)) => {
-                                crate::debug_log!("Found {} database(s)", dbs.len());
-                                tab.current_database = dbs.first().cloned();
-                                tab.databases = dbs;
-                                tab.db_client = Some(Arc::new(client));
-                                tab.client_database = Some(db_name);
-                                tab.rebuild_sidebar_items();
-                                tab.status_message = None;
-                                tab.view_state = ViewState::DatabaseView;
-                                tab.focus = Focus::Sidebar;
-                            }
-                            Err(e) => {
-                                crate::debug_log!("Connection failed: {}", e);
-                                tab.status_message = Some(format!("Connection failed: {}", e));
-                            }
+            PendingOperation::ListDatabases {
+                mut receiver,
+                conn_name,
+            } => match receiver.try_recv() {
+                Ok(result) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    match result {
+                        Ok(databases) => {
+                            crate::debug_log!("Found {} database(s)", databases.len());
+                            tab.name = conn_name;
+                            tab.databases = databases;
+                            tab.database_selected = 0;
+                            tab.status_message = None;
+                            tab.view_state = ViewState::DatabaseList;
                         }
-                        self.query_textarea = TextArea::default();
-                    }
-                    Err(oneshot::error::TryRecvError::Empty) => {
-                        // Still pending
-                        self.pending_operation = Some(PendingOperation::Connect {
-                            receiver,
-                            conn_name,
-                        });
-                    }
-                    Err(oneshot::error::TryRecvError::Closed) => {
-                        let tab = self.current_tab_mut();
-                        tab.loading = false;
-                        tab.status_message = Some("Connection task failed".to_string());
+                        Err(e) => {
+                            crate::debug_log!("Failed to list databases: {}", e);
+                            tab.status_message = Some(format!("Connection failed: {}", e));
+                        }
                     }
                 }
-            }
-            PendingOperation::Query { mut receiver, db_name, start } => {
-                match receiver.try_recv() {
-                    Ok(result) => {
-                        let elapsed = start.elapsed();
-                        let tab = self.current_tab_mut();
-                        tab.loading = false;
-                        tab.result_scroll = 0;
-                        tab.result_cursor = 0;
-                        tab.result_h_scroll = 0;
-                        let timestamp = Local::now().format("%H:%M:%S");
+                Err(oneshot::error::TryRecvError::Empty) => {
+                    self.pending_operation = Some(PendingOperation::ListDatabases {
+                        receiver,
+                        conn_name,
+                    });
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    tab.status_message = Some("Connection task failed".to_string());
+                }
+            },
+            PendingOperation::Connect {
+                mut receiver,
+                conn_name,
+                db_name,
+            } => match receiver.try_recv() {
+                Ok(result) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    match result {
+                        Ok((client, tables)) => {
+                            crate::debug_log!(
+                                "Connected to '{}', found {} table(s)",
+                                db_name,
+                                tables.len()
+                            );
+                            tab.name = format!("{} > {}", conn_name, db_name);
+                            tab.current_database = Some(db_name);
+                            tab.db_client = Some(Arc::new(client));
+                            tab.sidebar.tables = tables;
+                            tab.sidebar.selected = 0;
+                            tab.status_message = None;
+                            tab.view_state = ViewState::DatabaseView;
+                            tab.focus = Focus::Sidebar;
+                        }
+                        Err(e) => {
+                            crate::debug_log!("Connection failed: {}", e);
+                            tab.status_message = Some(format!("Connection failed: {}", e));
+                        }
+                    }
+                    self.query_textarea = TextArea::default();
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {
+                    self.pending_operation = Some(PendingOperation::Connect {
+                        receiver,
+                        conn_name,
+                        db_name,
+                    });
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    tab.status_message = Some("Connection task failed".to_string());
+                }
+            },
+            PendingOperation::Query {
+                mut receiver,
+                start,
+            } => match receiver.try_recv() {
+                Ok(result) => {
+                    let elapsed = start.elapsed();
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    tab.result_scroll = 0;
+                    tab.result_cursor = 0;
+                    tab.result_h_scroll = 0;
+                    let timestamp = Local::now().format("%H:%M:%S");
 
-                        match result {
-                            Ok((query_result, new_client)) => {
-                                // Cache new client if we created one
-                                if let Some(client) = new_client {
-                                    tab.db_client = Some(Arc::new(client));
-                                    tab.client_database = Some(db_name.clone());
+                    match result {
+                        Ok(query_result) => {
+                            tab.query_result = Some(query_result.clone());
+                            match &query_result {
+                                QueryResult::Select { rows, .. } => {
+                                    crate::debug_log!(
+                                        "Query returned {} row(s) in {:?}",
+                                        rows.len(),
+                                        elapsed
+                                    );
+                                    tab.status_message = Some(format!(
+                                        "[{}] {} row(s) returned in {:.2?}",
+                                        timestamp,
+                                        rows.len(),
+                                        elapsed
+                                    ));
                                 }
-                                tab.query_result = Some(query_result.clone());
-                                match &query_result {
-                                    QueryResult::Select { rows, .. } => {
-                                        crate::debug_log!(
-                                            "Query returned {} row(s) in {:?}",
-                                            rows.len(),
-                                            elapsed
-                                        );
-                                        tab.status_message = Some(format!(
-                                            "[{}] {} row(s) returned in {:.2?}",
-                                            timestamp,
-                                            rows.len(),
-                                            elapsed
-                                        ));
-                                    }
-                                    QueryResult::Execute { rows_affected } => {
-                                        crate::debug_log!(
-                                            "Query affected {} row(s) in {:?}",
-                                            rows_affected,
-                                            elapsed
-                                        );
-                                        tab.status_message = Some(format!(
-                                            "[{}] {} row(s) affected in {:.2?}",
-                                            timestamp, rows_affected, elapsed
-                                        ));
-                                        // TODO: refresh databases
-                                    }
+                                QueryResult::Execute { rows_affected } => {
+                                    crate::debug_log!(
+                                        "Query affected {} row(s) in {:?}",
+                                        rows_affected,
+                                        elapsed
+                                    );
+                                    tab.status_message = Some(format!(
+                                        "[{}] {} row(s) affected in {:.2?}",
+                                        timestamp, rows_affected, elapsed
+                                    ));
                                 }
-                            }
-                            Err(e) => {
-                                crate::debug_log!("Query error on database '{}': {}", db_name, e);
-                                tab.query_result = None;
-                                tab.status_message =
-                                    Some(format!("Error [{}]: {}", db_name, e));
                             }
                         }
-                    }
-                    Err(oneshot::error::TryRecvError::Empty) => {
-                        // Still pending
-                        self.pending_operation = Some(PendingOperation::Query {
-                            receiver,
-                            db_name,
-                            start,
-                        });
-                    }
-                    Err(oneshot::error::TryRecvError::Closed) => {
-                        let tab = self.current_tab_mut();
-                        tab.loading = false;
-                        tab.status_message = Some("Query task failed".to_string());
-                    }
-                }
-            }
-            PendingOperation::LoadTables { mut receiver, db_name } => {
-                match receiver.try_recv() {
-                    Ok(result) => {
-                        let tab = self.current_tab_mut();
-                        tab.loading = false;
-                        match result {
-                            Ok((tables, new_client)) => {
-                                // Cache new client if we created one
-                                if let Some(client) = new_client {
-                                    tab.db_client = Some(Arc::new(client));
-                                    tab.client_database = Some(db_name.clone());
-                                }
-                                crate::debug_log!(
-                                    "Loaded {} table(s) for database '{}'",
-                                    tables.len(),
-                                    db_name
-                                );
-                                tab.sidebar.tables.insert(db_name, tables);
-                                tab.rebuild_sidebar_items();
-                                tab.status_message = None;
-                            }
-                            Err(e) => {
-                                crate::debug_log!("Failed to load tables for '{}': {}", db_name, e);
-                                tab.status_message =
-                                    Some(format!("Failed to load tables: {}", e));
-                            }
+                        Err(e) => {
+                            let db_name = tab.current_database.as_deref().unwrap_or("unknown");
+                            crate::debug_log!("Query error on database '{}': {}", db_name, e);
+                            tab.query_result = None;
+                            tab.status_message = Some(format!("Error: {}", e));
                         }
                     }
-                    Err(oneshot::error::TryRecvError::Empty) => {
-                        // Still pending
-                        self.pending_operation = Some(PendingOperation::LoadTables {
-                            receiver,
-                            db_name,
-                        });
-                    }
-                    Err(oneshot::error::TryRecvError::Closed) => {
-                        let tab = self.current_tab_mut();
-                        tab.loading = false;
-                        tab.status_message = Some("Load tables task failed".to_string());
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {
+                    self.pending_operation = Some(PendingOperation::Query { receiver, start });
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    tab.status_message = Some("Query task failed".to_string());
+                }
+            },
+            PendingOperation::RefreshTables { mut receiver } => match receiver.try_recv() {
+                Ok(result) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    match result {
+                        Ok(tables) => {
+                            crate::debug_log!("Refreshed tables: {} table(s)", tables.len());
+                            tab.sidebar.tables = tables;
+                            if tab.sidebar.selected >= tab.sidebar.tables.len() {
+                                tab.sidebar.selected = tab.sidebar.tables.len().saturating_sub(1);
+                            }
+                            tab.status_message = None;
+                        }
+                        Err(e) => {
+                            crate::debug_log!("Failed to refresh tables: {}", e);
+                            tab.status_message = Some(format!("Failed to refresh: {}", e));
+                        }
                     }
                 }
-            }
+                Err(oneshot::error::TryRecvError::Empty) => {
+                    self.pending_operation = Some(PendingOperation::RefreshTables { receiver });
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    let tab = self.current_tab_mut();
+                    tab.loading = false;
+                    tab.status_message = Some("Refresh task failed".to_string());
+                }
+            },
         }
     }
 }

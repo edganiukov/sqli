@@ -4,8 +4,15 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui_textarea::CursorMove;
 
 impl Controller {
+    fn current_connection_name(&self) -> Option<&str> {
+        let tab = self.current_tab();
+        tab.connections
+            .get(tab.selected_index)
+            .map(|c| c.name.as_str())
+    }
+
     pub(super) fn open_template_popup(&mut self) {
-        let conn_name = self.current_tab().connected_db.as_deref().unwrap_or("");
+        let conn_name = self.current_connection_name().unwrap_or("");
 
         self.template_list_cache = self
             .template_store
@@ -36,8 +43,8 @@ impl Controller {
         }
 
         // Default scope based on current connection
-        let scope = match &self.current_tab().connected_db {
-            Some(conn) => TemplateScope::Connection(conn.clone()),
+        let scope = match self.current_connection_name() {
+            Some(conn) => TemplateScope::Connection(conn.to_string()),
             None => TemplateScope::Global,
         };
 
@@ -221,8 +228,8 @@ impl Controller {
             KeyCode::Tab => {
                 // Toggle between global and connection-specific
                 scope = match scope {
-                    TemplateScope::Global => match &self.current_tab().connected_db {
-                        Some(conn) => TemplateScope::Connection(conn.clone()),
+                    TemplateScope::Global => match self.current_connection_name() {
+                        Some(conn) => TemplateScope::Connection(conn.to_string()),
                         None => TemplateScope::Global,
                     },
                     TemplateScope::Connection(_) => TemplateScope::Global,

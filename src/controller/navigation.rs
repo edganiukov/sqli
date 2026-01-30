@@ -67,7 +67,6 @@ impl Controller {
 
     pub(super) fn focus_sidebar(&mut self) {
         self.current_tab_mut().focus = Focus::Sidebar;
-        self.refresh_databases();
     }
 
     pub(super) fn scroll_to_end(&mut self) {

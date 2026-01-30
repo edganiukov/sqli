@@ -1,11 +1,13 @@
-use crate::controller::{Controller, Focus, Mode, PopupState, SidebarItem, ViewState};
+use crate::controller::{Controller, Focus, Mode, PopupState, ViewState};
 use crate::db::QueryResult;
 use crate::templates::TemplateScope;
 use crossterm::event::KeyEvent;
 use ratatui::prelude::*;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+};
 
 const PADDING: u16 = 1;
 
@@ -28,7 +30,12 @@ fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_> {
     Block::default()
         .title(Line::from(vec![
             Span::styled("── ", Style::default().fg(border_color)),
-            Span::styled(title, Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(border_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" ──", Style::default().fg(border_color)),
         ]))
         .borders(borders)
@@ -62,8 +69,12 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
 
 // UI Helper: Calculate centered popup area with percentage
 fn centered_rect_pct(area: Rect, width_pct: f32, height_pct: f32, min_w: u16, min_h: u16) -> Rect {
-    let popup_width = ((area.width as f32 * width_pct) as u16).max(min_w).min(area.width);
-    let popup_height = ((area.height as f32 * height_pct) as u16).max(min_h).min(area.height);
+    let popup_width = ((area.width as f32 * width_pct) as u16)
+        .max(min_w)
+        .min(area.width);
+    let popup_height = ((area.height as f32 * height_pct) as u16)
+        .max(min_h)
+        .min(area.height);
     Rect {
         x: (area.width.saturating_sub(popup_width)) / 2,
         y: (area.height.saturating_sub(popup_height)) / 2,
@@ -153,6 +164,9 @@ impl App {
             ViewState::ConnectionList => {
                 self.draw_connection_list(frame, chunks[1]);
             }
+            ViewState::DatabaseList => {
+                self.draw_database_list(frame, chunks[1]);
+            }
             ViewState::DatabaseView => self.draw_database_view(frame, chunks[1]),
         };
 
@@ -180,12 +194,9 @@ impl App {
 
             let table_name = tab
                 .sidebar
-                .items
+                .tables
                 .get(tab.sidebar.selected)
-                .and_then(|item| match item {
-                    SidebarItem::Table { table, .. } => Some(format!(" > {}", table)),
-                    _ => None,
-                })
+                .map(|t| format!(" > {}", t))
                 .unwrap_or_default();
 
             let is_readonly = conn.map(|c| c.readonly).unwrap_or(false);
@@ -200,8 +211,11 @@ impl App {
             ]))
             .style(Style::default().bg(SURFACE_LIGHT))
         } else {
-            Paragraph::new(Line::from(vec![Span::styled(status_msg, Style::default().fg(TEXT))]))
-                .style(Style::default().bg(SURFACE_LIGHT))
+            Paragraph::new(Line::from(vec![Span::styled(
+                status_msg,
+                Style::default().fg(TEXT),
+            )]))
+            .style(Style::default().bg(SURFACE_LIGHT))
         };
         frame.render_widget(status_line, chunks[2]);
 
@@ -224,7 +238,10 @@ impl App {
         for (i, tab) in self.controller.tabs.iter().enumerate() {
             let tab_name = format!(" {} ", tab.name);
             let style = if i == self.controller.current_tab {
-                Style::default().fg(SURFACE).bg(BLUE).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(SURFACE)
+                    .bg(BLUE)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT_DIM).bg(SURFACE_LIGHT)
             };
@@ -244,10 +261,19 @@ impl App {
             .iter()
             .map(|conn| {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{}]", conn.db_type.as_str()), Style::default().fg(TEXT_DIM)),
+                    Span::styled(
+                        format!("[{}]", conn.db_type.as_str()),
+                        Style::default().fg(TEXT_DIM),
+                    ),
                     Span::raw(" "),
-                    Span::styled(&conn.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" {}:{}", conn.host, conn.port), Style::default().fg(TEXT_DIM)),
+                    Span::styled(
+                        &conn.name,
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {}:{}", conn.host, conn.port),
+                        Style::default().fg(TEXT_DIM),
+                    ),
                 ]))
             })
             .collect();
@@ -292,6 +318,54 @@ impl App {
         frame.render_stateful_widget(list, list_area, &mut list_state);
     }
 
+    fn draw_database_list(&self, frame: &mut Frame, area: Rect) {
+        let tab = self.controller.current_tab();
+        let items: Vec<ListItem> = tab
+            .databases
+            .iter()
+            .map(|db| ListItem::new(Line::from(Span::styled(db, Style::default().fg(TEXT)))))
+            .collect();
+
+        let padded_area = Rect {
+            x: area.x + PADDING,
+            y: area.y + PADDING,
+            width: area.width.saturating_sub(PADDING * 2),
+            height: area.height.saturating_sub(PADDING),
+        };
+
+        // Calculate centered area
+        let list_width = 50.min(padded_area.width);
+        let list_height = (tab.databases.len() as u16 + 4).min(padded_area.height);
+
+        let list_x = padded_area.x + (padded_area.width.saturating_sub(list_width)) / 2;
+        let list_y = padded_area.y + (padded_area.height.saturating_sub(list_height)) / 2;
+
+        let list_area = Rect {
+            x: list_x,
+            y: list_y,
+            width: list_width,
+            height: list_height,
+        };
+
+        let block = Block::default()
+            .title(" Select Database ")
+            .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(TEXT_DIM))
+            .style(Style::default().bg(SURFACE));
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
+            .highlight_symbol("> ");
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(tab.database_selected));
+
+        frame.render_stateful_widget(list, list_area, &mut list_state);
+    }
+
     fn draw_database_view(&mut self, frame: &mut Frame, area: Rect) {
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -319,35 +393,25 @@ impl App {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Sidebar;
 
-        let items: Vec<ListItem> = tab
-            .sidebar
-            .items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                let (prefix, name, style) = match item {
-                    SidebarItem::Database(db) => (
-                        "".to_string(),
-                        db.clone(),
-                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                    ),
-                    SidebarItem::Table { table, .. } => {
-                        let is_last = tab
-                            .sidebar
-                            .items
-                            .get(i + 1)
-                            .map(|next| matches!(next, SidebarItem::Database(_)))
-                            .unwrap_or(true);
-                        let prefix = if is_last { "└─ " } else { "├─ " };
-                        (prefix.to_string(), table.clone(), Style::default().fg(TEXT))
-                    }
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(prefix, Style::default().fg(TEXT_DIM)),
-                    Span::styled(name, style),
-                ]))
-            })
-            .collect();
+        // Build items: "Tables" header + table entries with tree lines
+        let table_count = tab.sidebar.tables.len();
+        let mut items: Vec<ListItem> = Vec::with_capacity(table_count + 1);
+
+        // Add "Tables" header (not selectable, just visual)
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            "Tables",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        )])));
+
+        // Add tables with tree-style prefixes
+        for (i, table) in tab.sidebar.tables.iter().enumerate() {
+            let is_last = i == table_count - 1;
+            let prefix = if is_last { "└─ " } else { "├─ " };
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(TEXT_DIM)),
+                Span::styled(table, Style::default().fg(TEXT)),
+            ])));
+        }
 
         let block = panel_block("Explorer", is_focused, Borders::RIGHT);
 
@@ -361,15 +425,16 @@ impl App {
             .highlight_symbol(if is_focused { "> " } else { "  " });
 
         let mut list_state = ListState::default();
-        list_state.select(Some(tab.sidebar.selected));
+        // Offset by 1 to account for "Tables" header
+        list_state.select(Some(tab.sidebar.selected + 1));
 
-        // Calculate scroll offset to keep selection 3 lines from bottom with 1 line padding
-        let visible_height = area.height.saturating_sub(2) as usize; // subtract borders
-        let selected = tab.sidebar.selected;
-        let padding_bottom = 0;
+        // Calculate scroll offset to keep selection visible
+        // Add 1 for header, subtract 2 for borders
+        let visible_height = area.height.saturating_sub(2) as usize;
+        let selected = tab.sidebar.selected + 1; // +1 for header
 
-        if visible_height > 0 && selected + padding_bottom >= visible_height {
-            let offset = selected + padding_bottom - visible_height + 1;
+        if visible_height > 0 && selected >= visible_height {
+            let offset = selected - visible_height + 1;
             *list_state.offset_mut() = offset;
         }
 
@@ -388,8 +453,14 @@ impl App {
             .set_style(Style::default().bg(bg_color).fg(TEXT));
         self.controller
             .query_textarea
-            .set_cursor_style(Style::default().bg(if is_focused { Color::White } else { TEXT_DIM }));
-        self.controller.query_textarea.set_cursor_line_style(Style::default());
+            .set_cursor_style(Style::default().bg(if is_focused {
+                Color::White
+            } else {
+                TEXT_DIM
+            }));
+        self.controller
+            .query_textarea
+            .set_cursor_line_style(Style::default());
         self.controller.query_textarea.set_block(block);
         self.controller
             .query_textarea
@@ -410,7 +481,8 @@ impl App {
         match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
                 if columns.is_empty() {
-                    let msg = Paragraph::new("No results").style(Style::default().fg(TEXT_DIM).bg(bg_color));
+                    let msg = Paragraph::new("No results")
+                        .style(Style::default().fg(TEXT_DIM).bg(bg_color));
                     frame.render_widget(msg, inner_area);
                 } else {
                     let available_width = inner_area.width as usize;
@@ -471,10 +543,14 @@ impl App {
                         remaining_width = remaining_width.saturating_sub(col_w);
                     }
 
-                    let header_cells = visible_col_indices.iter().zip(visible_col_widths.iter()).map(|(&col_idx, &w)| {
-                        let text = truncate_str(&columns[col_idx], w.saturating_sub(1));
-                        Cell::from(text).style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
-                    });
+                    let header_cells = visible_col_indices
+                        .iter()
+                        .zip(visible_col_widths.iter())
+                        .map(|(&col_idx, &w)| {
+                            let text = truncate_str(&columns[col_idx], w.saturating_sub(1));
+                            Cell::from(text)
+                                .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
+                        });
                     let header = Row::new(header_cells)
                         .height(1)
                         .style(Style::default().bg(SURFACE_LIGHT));
@@ -490,11 +566,15 @@ impl App {
                         .skip(scroll)
                         .take(visible_height)
                         .map(|(idx, row)| {
-                            let cells = visible_col_indices.iter().zip(visible_col_widths.iter()).map(|(&col_idx, &w)| {
-                                let cell_text = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
-                                let text = truncate_str(cell_text, w.saturating_sub(1));
-                                Cell::from(text).style(Style::default().fg(TEXT))
-                            });
+                            let cells = visible_col_indices
+                                .iter()
+                                .zip(visible_col_widths.iter())
+                                .map(|(&col_idx, &w)| {
+                                    let cell_text =
+                                        row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                                    let text = truncate_str(cell_text, w.saturating_sub(1));
+                                    Cell::from(text).style(Style::default().fg(TEXT))
+                                });
                             let row = Row::new(cells).height(1);
                             if idx == cursor && is_focused {
                                 row.style(Style::default().bg(HIGHLIGHT))
@@ -503,7 +583,10 @@ impl App {
                             }
                         });
 
-                    let widths: Vec<Constraint> = visible_col_widths.iter().map(|&w| Constraint::Length(w as u16)).collect();
+                    let widths: Vec<Constraint> = visible_col_widths
+                        .iter()
+                        .map(|&w| Constraint::Length(w as u16))
+                        .collect();
 
                     let table = Table::new(visible_rows, widths)
                         .header(header)
@@ -551,7 +634,13 @@ impl App {
         }
     }
 
-    fn draw_template_list_popup(&self, frame: &mut Frame, selected: usize, filter: &str, searching: bool) {
+    fn draw_template_list_popup(
+        &self,
+        frame: &mut Frame,
+        selected: usize,
+        filter: &str,
+        searching: bool,
+    ) {
         let area = frame.area();
         let all_templates = &self.controller.template_list_cache;
 
@@ -588,15 +677,28 @@ impl App {
                     TemplateScope::Global => "[global]".to_string(),
                     TemplateScope::Connection(name) => format!("[{}]", name),
                 };
-                let preview: String = t.query.lines().next().unwrap_or("").chars().take(40).collect();
+                let preview: String = t
+                    .query
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(40)
+                    .collect();
 
                 ListItem::new(vec![
                     Line::from(vec![
                         Span::styled(scope_str, Style::default().fg(TEXT_DIM)),
                         Span::raw(" "),
-                        Span::styled(&t.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            &t.name,
+                            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                        ),
                     ]),
-                    Line::from(Span::styled(format!("  {}", preview), Style::default().fg(TEXT_DIM))),
+                    Line::from(Span::styled(
+                        format!("  {}", preview),
+                        Style::default().fg(TEXT_DIM),
+                    )),
                 ])
             })
             .collect();
@@ -656,7 +758,8 @@ impl App {
             TemplateScope::Connection(conn) => &format!("[ ] Local ({})", conn),
         };
         frame.render_widget(
-            Paragraph::new(format!("Tab to toggle: {}", scope_text)).style(Style::default().fg(TEXT_DIM)),
+            Paragraph::new(format!("Tab to toggle: {}", scope_text))
+                .style(Style::default().fg(TEXT_DIM)),
             chunks[3],
         );
 
@@ -724,7 +827,10 @@ impl App {
                 lines.push(Line::from(vec![
                     Span::styled(field_name, Style::default().fg(WARNING)),
                     Span::styled(" : ", Style::default().fg(TEXT_DIM)),
-                    Span::styled("(empty)", Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)),
+                    Span::styled(
+                        "(empty)",
+                        Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC),
+                    ),
                 ]));
             } else {
                 // Wrap long values
