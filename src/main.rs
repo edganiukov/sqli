@@ -84,13 +84,10 @@ fn run(
 
         // Use poll with timeout to allow spinner animation
         if event::poll(std::time::Duration::from_millis(100))? {
-            let event = event::read()?;
-            debug::log(&format!("Event received: {:?}", event));
-            if let Event::Key(key) = event {
-                if key.kind == KeyEventKind::Press {
-                    debug::log(&format!("Key press: {:?}", key.code));
-                    app.handle_key(key);
-                }
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                app.handle_key(key);
             }
         }
 

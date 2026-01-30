@@ -143,9 +143,6 @@ impl App {
     }
 
     pub fn poll_pending(&mut self) {
-        if self.controller.pending_operation.is_some() {
-            crate::debug_log!("poll_pending: has pending operation");
-        }
         self.controller.poll_pending();
     }
 
