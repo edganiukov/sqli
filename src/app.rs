@@ -17,7 +17,7 @@ const BLUE: Color = Color::Rgb(70, 115, 150); // Dim blue
 const SUCCESS: Color = Color::Rgb(130, 160, 110); // Muted green
 const WARNING: Color = Color::Rgb(190, 160, 100); // Muted gold
 const SURFACE: Color = Color::Rgb(30, 30, 35); // Cool dark background (focused)
-const SURFACE_LIGHT: Color = Color::Rgb(35, 35, 40); // Slightly lighter (unfocused)
+const SURFACE_DIM: Color = Color::Rgb(22, 22, 26); // Darker (unfocused)
 const TEXT: Color = Color::Rgb(220, 220, 225); // Crisp white text
 const TEXT_DIM: Color = Color::Rgb(120, 120, 125); // Cool dimmed text
 const HIGHLIGHT: Color = Color::Rgb(50, 50, 60); // Cool selection
@@ -25,7 +25,7 @@ const HIGHLIGHT: Color = Color::Rgb(50, 50, 60); // Cool selection
 // UI Helper: Create a styled panel block with title
 fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_> {
     let border_color = if is_focused { BLUE } else { TEXT_DIM };
-    let bg_color = if is_focused { SURFACE } else { SURFACE_LIGHT };
+    let bg_color = if is_focused { SURFACE } else { SURFACE_DIM };
 
     Block::default()
         .title(Line::from(vec![
@@ -88,7 +88,7 @@ fn focus_colors(is_focused: bool) -> (Color, Color) {
     if is_focused {
         (BLUE, SURFACE)
     } else {
-        (TEXT_DIM, SURFACE_LIGHT)
+        (TEXT_DIM, SURFACE_DIM)
     }
 }
 
@@ -214,13 +214,13 @@ impl App {
                 ),
                 Span::styled(status_msg, Style::default().fg(TEXT_DIM)),
             ]))
-            .style(Style::default().bg(SURFACE_LIGHT))
+            .style(Style::default().bg(SURFACE_DIM))
         } else {
             Paragraph::new(Line::from(vec![Span::styled(
                 status_msg,
                 Style::default().fg(TEXT),
             )]))
-            .style(Style::default().bg(SURFACE_LIGHT))
+            .style(Style::default().bg(SURFACE_DIM))
         };
         frame.render_widget(status_line, chunks[2]);
 
@@ -248,7 +248,7 @@ impl App {
                     .bg(BLUE)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(TEXT_DIM).bg(SURFACE_LIGHT)
+                Style::default().fg(TEXT_DIM).bg(SURFACE_DIM)
             };
 
             spans.push(Span::styled(tab_name, style));
@@ -424,7 +424,7 @@ impl App {
             .block(block)
             .highlight_style(
                 Style::default()
-                    .bg(if is_focused { HIGHLIGHT } else { SURFACE_LIGHT })
+                    .bg(if is_focused { HIGHLIGHT } else { SURFACE_DIM })
                     .fg(TEXT),
             )
             .highlight_symbol(if is_focused { "> " } else { "  " });
@@ -558,7 +558,7 @@ impl App {
                         });
                     let header = Row::new(header_cells)
                         .height(1)
-                        .style(Style::default().bg(SURFACE_LIGHT));
+                        .style(Style::default().bg(SURFACE_DIM));
 
                     // Calculate visible rows based on scroll position
                     let visible_height = inner_area.height.saturating_sub(1) as usize; // -1 for header
@@ -754,7 +754,7 @@ impl App {
 
         let input_display = format!("{}_", name);
         frame.render_widget(
-            Paragraph::new(input_display).style(Style::default().fg(TEXT).bg(SURFACE_LIGHT)),
+            Paragraph::new(input_display).style(Style::default().fg(TEXT).bg(SURFACE_DIM)),
             chunks[1],
         );
 
