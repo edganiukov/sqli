@@ -237,51 +237,39 @@ impl Tab {
     }
 
     pub fn select_next(&mut self) {
-        if !self.connections.is_empty() {
-            self.selected_index = (self.selected_index + 1) % self.connections.len();
-        }
+        cycle_next(&mut self.selected_index, self.connections.len());
     }
 
     pub fn select_previous(&mut self) {
-        if !self.connections.is_empty() {
-            if self.selected_index == 0 {
-                self.selected_index = self.connections.len() - 1;
-            } else {
-                self.selected_index -= 1;
-            }
-        }
+        cycle_prev(&mut self.selected_index, self.connections.len());
     }
 
     pub fn sidebar_next(&mut self) {
-        if !self.sidebar.tables.is_empty() {
-            self.sidebar.selected = (self.sidebar.selected + 1) % self.sidebar.tables.len();
-        }
+        cycle_next(&mut self.sidebar.selected, self.sidebar.tables.len());
     }
 
     pub fn sidebar_prev(&mut self) {
-        if !self.sidebar.tables.is_empty() {
-            if self.sidebar.selected == 0 {
-                self.sidebar.selected = self.sidebar.tables.len() - 1;
-            } else {
-                self.sidebar.selected -= 1;
-            }
-        }
+        cycle_prev(&mut self.sidebar.selected, self.sidebar.tables.len());
     }
 
     pub fn database_next(&mut self) {
-        if !self.databases.is_empty() {
-            self.database_selected = (self.database_selected + 1) % self.databases.len();
-        }
+        cycle_next(&mut self.database_selected, self.databases.len());
     }
 
     pub fn database_prev(&mut self) {
-        if !self.databases.is_empty() {
-            if self.database_selected == 0 {
-                self.database_selected = self.databases.len() - 1;
-            } else {
-                self.database_selected -= 1;
-            }
-        }
+        cycle_prev(&mut self.database_selected, self.databases.len());
+    }
+}
+
+fn cycle_next(index: &mut usize, len: usize) {
+    if len > 0 {
+        *index = (*index + 1) % len;
+    }
+}
+
+fn cycle_prev(index: &mut usize, len: usize) {
+    if len > 0 {
+        *index = if *index == 0 { len - 1 } else { *index - 1 };
     }
 }
 

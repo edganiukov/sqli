@@ -123,61 +123,7 @@ impl Controller {
 
     pub(super) fn execute_query(&mut self) {
         let query: String = self.query_textarea.lines().join("\n");
-        if query.trim().is_empty() {
-            return;
-        }
-
-        let tab = self.current_tab();
-        let conn = match tab.connections.get(tab.selected_index) {
-            Some(c) => c.clone(),
-            None => return,
-        };
-
-        // Block non-read operations on readonly connections
-        if conn.readonly && !Self::is_read_query(&query) {
-            debug_log!(
-                "Blocked write query on readonly connection: {}",
-                query.trim()
-            );
-            self.current_tab_mut().status_message =
-                Some("Connection is read-only, only SELECT queries allowed".to_string());
-            return;
-        }
-
-        let client = match &tab.db_client {
-            Some(c) => Arc::clone(c),
-            None => {
-                self.current_tab_mut().status_message = Some("Not connected".to_string());
-                return;
-            }
-        };
-
-        let db_name = tab.current_database.clone().unwrap_or_default();
-
-        debug_log!(
-            "Executing query on database '{}': {}",
-            db_name,
-            query.trim().replace('\n', " ")
-        );
-
-        {
-            let tab = self.current_tab_mut();
-            tab.loading = true;
-            tab.status_message = Some("Executing...".to_string());
-        }
-
-        let start = std::time::Instant::now();
-
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = client.execute_query(&query).await;
-            let _ = tx.send(result);
-        });
-
-        self.pending_operation = Some(PendingOperation::Query {
-            receiver: rx,
-            start,
-        });
+        self.run_query(&query);
     }
 
     pub(super) fn refresh_tables(&mut self) {
@@ -218,56 +164,81 @@ impl Controller {
     }
 
     pub(super) fn select_table(&mut self) {
-        let tab = self.current_tab();
-        let table = match tab.sidebar.tables.get(tab.sidebar.selected) {
-            Some(t) => t.clone(),
-            None => return,
-        };
-
-        let db_name = match &tab.current_database {
-            Some(db) => db.clone(),
-            None => return,
-        };
-
-        debug_log!("Selected table '{}' from database '{}'", table, db_name);
-
-        let query = tab
-            .db_client
-            .as_ref()
-            .map(|c| c.select_table_query(&table, 50, Some(&db_name)))
-            .unwrap_or_default();
-
-        debug_log!("Generated query: {}", query);
-        self.query_textarea.select_all();
-        self.query_textarea.cut();
-        self.query_textarea.insert_str(&query);
-        self.execute_query();
-        self.current_tab_mut().focus = Focus::Output;
+        if let Some(query) = self.table_query(|c, t, db| c.select_table_query(t, 50, Some(db))) {
+            self.run_query(&query);
+            self.current_tab_mut().focus = Focus::Output;
+        }
     }
 
     pub(super) fn describe_table(&mut self) {
+        if let Some(query) = self.table_query(|c, t, db| c.describe_table_query(t, Some(db))) {
+            self.run_query(&query);
+            self.current_tab_mut().focus = Focus::Output;
+        }
+    }
+
+    /// Helper to generate a query for the currently selected table
+    fn table_query<F>(&self, f: F) -> Option<String>
+    where
+        F: FnOnce(&crate::db::DatabaseClient, &str, &str) -> String,
+    {
         let tab = self.current_tab();
-        let table = match tab.sidebar.tables.get(tab.sidebar.selected) {
-            Some(t) => t.clone(),
+        let table = tab.sidebar.tables.get(tab.sidebar.selected)?;
+        let db_name = tab.current_database.as_ref()?;
+        let client = tab.db_client.as_ref()?;
+        Some(f(client, table, db_name))
+    }
+
+    /// Execute a query string
+    fn run_query(&mut self, query: &str) {
+        if query.trim().is_empty() {
+            return;
+        }
+
+        let tab = self.current_tab();
+        let conn = match tab.connections.get(tab.selected_index) {
+            Some(c) => c.clone(),
             None => return,
         };
 
-        let db_name = match &tab.current_database {
-            Some(db) => db.clone(),
-            None => return,
+        if conn.readonly && !Self::is_read_query(query) {
+            self.current_tab_mut().status_message =
+                Some("Connection is read-only, only SELECT queries allowed".to_string());
+            return;
+        }
+
+        let client = match &tab.db_client {
+            Some(c) => Arc::clone(c),
+            None => {
+                self.current_tab_mut().status_message = Some("Not connected".to_string());
+                return;
+            }
         };
 
-        let query = tab
-            .db_client
-            .as_ref()
-            .map(|c| c.describe_table_query(&table, Some(&db_name)))
-            .unwrap_or_default();
+        debug_log!(
+            "Executing direct query: {}",
+            query.trim().replace('\n', " ")
+        );
 
-        self.query_textarea.select_all();
-        self.query_textarea.cut();
-        self.query_textarea.insert_str(&query);
-        self.execute_query();
-        self.current_tab_mut().focus = Focus::Output;
+        {
+            let tab = self.current_tab_mut();
+            tab.loading = true;
+            tab.status_message = Some("Executing...".to_string());
+        }
+
+        let start = std::time::Instant::now();
+        let query = query.to_string();
+
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = client.execute_query(&query).await;
+            let _ = tx.send(result);
+        });
+
+        self.pending_operation = Some(PendingOperation::Query {
+            receiver: rx,
+            start,
+        });
     }
 
     pub fn is_read_query(query: &str) -> bool {
