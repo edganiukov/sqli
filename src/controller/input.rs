@@ -3,8 +3,18 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl Controller {
     pub fn handle_normal_mode(&mut self, key_event: KeyEvent) {
+        crate::debug_log!(
+            "handle_normal_mode: key={:?}, mode={:?}, view={:?}, loading={}, pending={}",
+            key_event.code,
+            self.mode,
+            self.current_tab().view_state,
+            self.current_tab().loading,
+            self.pending_operation.is_some()
+        );
+
         // Esc cancels pending operation (if any)
         if key_event.code == KeyCode::Esc && self.cancel_pending_operation() {
+            crate::debug_log!("Cancelled pending operation");
             return;
         }
 
@@ -19,8 +29,14 @@ impl Controller {
     /// Cancel any pending async operation. Returns true if something was cancelled.
     fn cancel_pending_operation(&mut self) -> bool {
         if let Some(op) = self.pending_operation.take() {
+            crate::debug_log!("Cancelling operation: {:?}", std::mem::discriminant(&op));
+            
+            // Reset any pending flags
+            self.pending_escape = false;
+            
             let tab = self.current_tab_mut();
             tab.loading = false;
+            tab.pending_g = false;
             tab.status_message = Some("Cancelled".to_string());
 
             // Reset view state based on what operation was cancelled
@@ -41,6 +57,11 @@ impl Controller {
                     // Stay in database view, just cancel the operation
                 }
             }
+            crate::debug_log!(
+                "After cancel: view={:?}, loading={}",
+                tab.view_state,
+                tab.loading
+            );
             true
         } else {
             false
@@ -65,7 +86,15 @@ impl Controller {
             KeyCode::Enter => {
                 self.initiate_connection();
             }
-            _ => {}
+            KeyCode::Esc => {
+                // Clear any residual state
+                let tab = self.current_tab_mut();
+                tab.loading = false;
+                tab.status_message = None;
+            }
+            _ => {
+                crate::debug_log!("ConnectionList: unhandled key {:?}", key_code);
+            }
         }
     }
 

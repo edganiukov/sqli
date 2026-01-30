@@ -127,6 +127,11 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key_event: KeyEvent) {
+        crate::debug_log!(
+            "handle_key: mode={:?}, key={:?}",
+            self.controller.mode,
+            key_event.code
+        );
         match self.controller.mode {
             Mode::Normal => self.controller.handle_normal_mode(key_event),
             Mode::Command => self.controller.handle_command_mode(key_event.code),
@@ -138,6 +143,9 @@ impl App {
     }
 
     pub fn poll_pending(&mut self) {
+        if self.controller.pending_operation.is_some() {
+            crate::debug_log!("poll_pending: has pending operation");
+        }
         self.controller.poll_pending();
     }
 
