@@ -5,7 +5,8 @@ use tokio::sync::oneshot;
 use tui_textarea::TextArea;
 
 impl Controller {
-    /// Step 1: User selects a connection - fetch list of databases for popup
+    /// Step 1: User selects a connection - either connect directly (if database configured)
+    /// or fetch list of databases for selection
     pub(super) fn initiate_connection(&mut self) {
         let tab = self.current_tab_mut();
         let conn = match tab.connections.get(tab.selected_index) {
@@ -21,6 +22,14 @@ impl Controller {
             conn.port
         );
 
+        // If database is configured, connect directly
+        if let Some(db_name) = conn.database.clone() {
+            debug_log!("Database '{}' configured, connecting directly", db_name);
+            self.connect_to_database(db_name);
+            return;
+        }
+
+        // Otherwise, fetch database list for selection
         tab.status_message = Some("Connecting...".to_string());
         tab.loading = true;
 

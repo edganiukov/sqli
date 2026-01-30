@@ -18,6 +18,8 @@ pub struct ConnectionConfig {
     #[serde(default)]
     pub password_cmd: Option<String>,
     #[serde(default)]
+    pub database: Option<String>,
+    #[serde(default)]
     pub tls: bool,
     #[serde(default)]
     pub readonly: bool,
@@ -41,6 +43,7 @@ impl ConnectionConfig {
             user: self.user.clone(),
             password: self.password.clone(),
             password_cmd: self.password_cmd.clone(),
+            database: self.database.clone(),
             tls: self.tls,
             readonly: self.readonly,
         })
@@ -140,6 +143,7 @@ fn default_connections() -> Vec<DatabaseConn> {
         user: "postgres".to_string(),
         password: None,
         password_cmd: None,
+        database: None,
         tls: false,
         readonly: false,
     }]

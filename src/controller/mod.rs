@@ -134,6 +134,7 @@ pub struct DatabaseConn {
     pub user: String,
     pub password: Option<String>,
     pub password_cmd: Option<String>,
+    pub database: Option<String>,
     pub tls: bool,
     pub readonly: bool,
 }
