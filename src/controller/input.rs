@@ -3,11 +3,28 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl Controller {
     pub fn handle_normal_mode(&mut self, key_event: KeyEvent) {
+        // Esc cancels pending operation (if any)
+        if key_event.code == KeyCode::Esc && self.cancel_pending_operation() {
+            return;
+        }
+
         let view_state = self.current_tab().view_state;
         match view_state {
             ViewState::ConnectionList => self.handle_connection_list_keys(key_event.code),
             ViewState::DatabaseList => self.handle_database_list_keys(key_event.code),
             ViewState::DatabaseView => self.handle_database_view_keys(key_event),
+        }
+    }
+
+    /// Cancel any pending async operation. Returns true if something was cancelled.
+    fn cancel_pending_operation(&mut self) -> bool {
+        if self.pending_operation.take().is_some() {
+            let tab = self.current_tab_mut();
+            tab.loading = false;
+            tab.status_message = Some("Cancelled".to_string());
+            true
+        } else {
+            false
         }
     }
 
