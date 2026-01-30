@@ -53,9 +53,6 @@ impl Controller {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
             }
-            KeyCode::Char('q') => {
-                self.close_current_tab();
-            }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.current_tab_mut().select_next();
             }
@@ -77,9 +74,6 @@ impl Controller {
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
-            }
-            KeyCode::Char('q') => {
-                self.close_current_tab();
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.current_tab_mut().database_next();
