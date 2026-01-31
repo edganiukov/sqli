@@ -162,6 +162,23 @@ impl ClickHouseClient {
         }
     }
 
+    pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
+        let query = match database {
+            Some(db) => format!(
+                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{}'",
+                db, table
+            ),
+            None => format!("SELECT name FROM system.columns WHERE table = '{}'", table),
+        };
+        let result = self.execute_query(&query).await?;
+        match result {
+            QueryResult::Select { rows, .. } => {
+                Ok(rows.into_iter().filter_map(|r| r.into_iter().next()).collect())
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
     fn format_value(value: &serde_json::Value) -> String {
         match value {
             serde_json::Value::Null => "NULL".to_string(),

@@ -67,4 +67,14 @@ impl DatabaseClient {
             DatabaseClient::ClickHouse(client) => client.describe_table_query(table, schema),
         }
     }
+
+    /// Get column names for a table
+    pub async fn list_columns(&self, table: &str, schema: Option<&str>) -> Result<Vec<String>> {
+        match self {
+            DatabaseClient::Postgres(client) => client.list_columns(table).await,
+            DatabaseClient::MySql(client) => client.list_columns(table).await,
+            DatabaseClient::Cassandra(client) => client.list_columns(table, schema).await,
+            DatabaseClient::ClickHouse(client) => client.list_columns(table, schema).await,
+        }
+    }
 }

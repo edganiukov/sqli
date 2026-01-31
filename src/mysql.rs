@@ -111,6 +111,12 @@ impl MySqlClient {
         format!("describe {}", table)
     }
 
+    pub async fn list_columns(&self, table: &str) -> Result<Vec<String>> {
+        let query = format!("SHOW COLUMNS FROM {}", table);
+        let rows: Vec<mysql_async::Row> = self.pool.get_conn().await?.query(query).await?;
+        Ok(rows.iter().filter_map(|r| r.get::<String, _>(0)).collect())
+    }
+
     fn format_value(value: Option<Value>) -> String {
         match value {
             None => "NULL".to_string(),

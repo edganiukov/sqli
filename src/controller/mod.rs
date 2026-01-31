@@ -210,6 +210,7 @@ pub struct Tab {
     pub databases: Vec<String>,           // list of databases for DatabaseList view
     pub database_selected: usize,         // selected index in database list
     pub sidebar: SidebarState,
+    pub column_cache: std::collections::HashMap<String, Vec<String>>, // table -> columns
     pub query_result: Option<QueryResult>,
     pub result_scroll: usize,
     pub result_cursor: usize,
@@ -234,6 +235,7 @@ impl Tab {
             databases: Vec::new(),
             database_selected: 0,
             sidebar: SidebarState::default(),
+            column_cache: std::collections::HashMap::new(),
             query_result: None,
             result_scroll: 0,
             result_cursor: 0,

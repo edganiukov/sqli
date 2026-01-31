@@ -1,5 +1,5 @@
 use super::{Controller, PopupState};
-use crate::completion::{self, Suggestion};
+use crate::completion::{self, CompletionContext, Suggestion};
 use crossterm::event::{KeyCode, KeyEvent};
 use tui_textarea::CursorMove;
 
@@ -25,8 +25,15 @@ impl Controller {
         // Get tables from sidebar
         let tables: Vec<String> = self.current_tab().sidebar.tables.clone();
         
+        // Get columns if needed for column context
+        let columns: Vec<String> = if let CompletionContext::Column { ref table_or_alias } = context {
+            self.get_columns_for_completion(table_or_alias, &query)
+        } else {
+            Vec::new()
+        };
+        
         // Get suggestions
-        let suggestions = completion::get_suggestions(&context, &current_word, &tables, &[]);
+        let suggestions = completion::get_suggestions(&context, &current_word, &tables, &columns);
         
         if suggestions.is_empty() {
             self.current_tab_mut().status_message = Some("No completions available".to_string());
@@ -38,6 +45,68 @@ impl Controller {
             selected: 0,
             word_start,
         };
+    }
+    
+    /// Get columns for a table or alias, using cache or fetching from DB
+    fn get_columns_for_completion(&mut self, table_or_alias: &str, query: &str) -> Vec<String> {
+        // First, try to resolve alias to actual table name
+        let table_name = self.resolve_table_alias(table_or_alias, query)
+            .unwrap_or_else(|| table_or_alias.to_string());
+        
+        // Check if we have columns cached
+        if let Some(columns) = self.current_tab().column_cache.get(&table_name) {
+            return columns.clone();
+        }
+        
+        // Try to fetch columns from database
+        let tab = self.current_tab();
+        let db_client = match &tab.db_client {
+            Some(client) => client.clone(),
+            None => return Vec::new(),
+        };
+        let current_db = tab.current_database.clone();
+        
+        let result = self.runtime.block_on(async {
+            db_client.list_columns(&table_name, current_db.as_deref()).await
+        });
+        
+        match result {
+            Ok(columns) => {
+                // Cache the columns
+                self.current_tab_mut().column_cache.insert(table_name, columns.clone());
+                columns
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+    
+    /// Try to resolve a table alias to the actual table name by parsing the query
+    fn resolve_table_alias(&self, alias: &str, query: &str) -> Option<String> {
+        let query_lower = query.to_lowercase();
+        let alias_lower = alias.to_lowercase();
+        
+        // Look for patterns like "FROM table_name alias" or "FROM table_name AS alias"
+        // or "JOIN table_name alias" or "JOIN table_name AS alias"
+        let tables = &self.current_tab().sidebar.tables;
+        
+        for table in tables {
+            let table_lower = table.to_lowercase();
+            
+            // Pattern: "table alias" or "table AS alias"
+            let pattern1 = format!("{} {}", table_lower, alias_lower);
+            let pattern2 = format!("{} as {}", table_lower, alias_lower);
+            
+            if query_lower.contains(&pattern1) || query_lower.contains(&pattern2) {
+                return Some(table.clone());
+            }
+        }
+        
+        // If alias matches a table name directly, use it
+        if tables.iter().any(|t| t.to_lowercase() == alias_lower) {
+            return Some(alias.to_string());
+        }
+        
+        None
     }
     
     pub(super) fn handle_completion_keys(

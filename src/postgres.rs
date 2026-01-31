@@ -125,6 +125,16 @@ impl PostgresClient {
         )
     }
 
+    pub async fn list_columns(&self, table: &str) -> Result<Vec<String>> {
+        let query = format!(
+            "SELECT column_name FROM information_schema.columns \
+             WHERE table_name = '{}' ORDER BY ordinal_position",
+            table
+        );
+        let rows = self.client.query(&query, &[]).await?;
+        Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
+    }
+
     fn get_column_value(row: &Row, idx: usize) -> String {
         let col_type = row.columns()[idx].type_();
 

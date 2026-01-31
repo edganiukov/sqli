@@ -1,7 +1,6 @@
 /// SQL autocompletion support
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum CompletionContext {
     /// After SELECT, WHERE, ORDER BY, etc. - suggest columns and keywords
     General,
@@ -9,8 +8,6 @@ pub enum CompletionContext {
     Table,
     /// After a table alias and dot (e.g., "u.") - suggest columns for that table
     Column { table_or_alias: String },
-    /// No completion needed
-    None,
 }
 
 #[derive(Debug, Clone)]
@@ -20,7 +17,6 @@ pub struct Suggestion {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 pub enum SuggestionKind {
     Keyword,
     Table,
@@ -108,7 +104,7 @@ pub fn get_suggestions(
     context: &CompletionContext,
     prefix: &str,
     tables: &[String],
-    _columns: &[String], // For future column completion
+    columns: &[String],
 ) -> Vec<Suggestion> {
     let prefix_lower = prefix.to_lowercase();
     let mut suggestions = Vec::new();
@@ -146,10 +142,16 @@ pub fn get_suggestions(
             }
         }
         CompletionContext::Column { .. } => {
-            // TODO: Suggest columns for the specific table
-            // For now, just return empty - will implement with column cache
+            // Suggest columns for the table
+            for col in columns {
+                if col.to_lowercase().starts_with(&prefix_lower) {
+                    suggestions.push(Suggestion {
+                        text: col.clone(),
+                        kind: SuggestionKind::Column,
+                    });
+                }
+            }
         }
-        CompletionContext::None => {}
     }
     
     // Sort: exact prefix matches first, then alphabetically

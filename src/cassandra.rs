@@ -153,6 +153,32 @@ impl CassandraClient {
         }
     }
 
+    pub async fn list_columns(&self, table: &str, keyspace: Option<&str>) -> Result<Vec<String>> {
+        let query = match keyspace {
+            Some(ks) => format!(
+                "SELECT column_name FROM system_schema.columns \
+                 WHERE keyspace_name = '{}' AND table_name = '{}'",
+                ks, table
+            ),
+            None => format!(
+                "SELECT column_name FROM system_schema.columns WHERE table_name = '{}'",
+                table
+            ),
+        };
+        let result = self.session.query_unpaged(query, &[]).await?;
+        let mut columns = Vec::new();
+        if let Some(rows) = result.rows {
+            for row in rows {
+                if let Some(Some(scylla::frame::response::result::CqlValue::Text(name))) =
+                    row.columns.first()
+                {
+                    columns.push(name.clone());
+                }
+            }
+        }
+        Ok(columns)
+    }
+
     fn format_column_value(value: &Option<CqlValue>) -> String {
         match value {
             None => "NULL".to_string(),
