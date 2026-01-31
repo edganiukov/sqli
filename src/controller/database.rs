@@ -151,7 +151,14 @@ impl Controller {
     }
 
     pub(super) fn execute_query(&mut self) {
-        let query: String = self.query_textarea.lines().join("\n");
+        let query: String = self
+            .query_textarea
+            .lines()
+            .iter()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         self.run_query(&query);
     }
 
