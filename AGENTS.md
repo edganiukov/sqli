@@ -38,6 +38,7 @@ cargo clippy --fix        # Auto-fix lint warnings
 ## Git
 - Commit title in the following format - `<type>(<component>): <description>`
   The type is one of: `feat` (for feature), fix, chore (refactoring, cleanup).
+  Add a body to a commit with short description (4-5 lines).
 
 ## Project Structure
 
