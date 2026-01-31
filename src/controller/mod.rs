@@ -286,6 +286,7 @@ pub struct Controller {
     pub template_list_cache: Vec<Template>,
     pub needs_redraw: bool,
     pub pending_escape: bool,
+    pub pending_ctrl_w: bool,
     pub spinner_state: usize,
     pub pending_operation: Option<PendingOperation>,
 }
@@ -310,6 +311,7 @@ impl Controller {
             template_list_cache: Vec::new(),
             needs_redraw: false,
             pending_escape: false,
+            pending_ctrl_w: false,
         }
     }
 

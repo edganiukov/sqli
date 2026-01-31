@@ -1,4 +1,5 @@
 use super::{Controller, DatabaseType, Focus, PendingOperation};
+use crate::db::{DatabaseClient, QueryResult};
 use crate::debug_log;
 use crate::error::SqliError;
 use std::sync::Arc;
@@ -225,9 +226,19 @@ impl Controller {
         Some(f(client, table, db_name))
     }
 
-    /// Execute a query string
+    /// Split query text into individual statements by semicolon
+    fn split_queries(query: &str) -> Vec<String> {
+        query
+            .split(';')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// Execute a query string (may contain multiple statements separated by `;`)
     fn run_query(&mut self, query: &str) {
-        if query.trim().is_empty() {
+        let statements = Self::split_queries(query);
+        if statements.is_empty() {
             return;
         }
 
@@ -237,10 +248,15 @@ impl Controller {
             None => return,
         };
 
-        if conn.readonly && !Self::is_read_query(query) {
-            self.current_tab_mut().status_message =
-                Some("Connection is read-only, only select queries allowed".to_string());
-            return;
+        // Check readonly for all statements
+        if conn.readonly {
+            for stmt in &statements {
+                if !Self::is_read_query(stmt) {
+                    self.current_tab_mut().status_message =
+                        Some("Connection is read-only, only select queries allowed".to_string());
+                    return;
+                }
+            }
         }
 
         let client = match &tab.db_client {
@@ -252,7 +268,8 @@ impl Controller {
         };
 
         debug_log!(
-            "Executing direct query: {}",
+            "Executing {} statement(s): {}",
+            statements.len(),
             query.trim().replace('\n', " ")
         );
 
@@ -263,11 +280,10 @@ impl Controller {
         }
 
         let start = std::time::Instant::now();
-        let query = query.to_string();
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let result = client.execute_query(&query).await;
+            let result = Self::execute_statements(&client, statements).await;
             let _ = tx.send(result);
         });
 
@@ -275,6 +291,32 @@ impl Controller {
             receiver: rx,
             start,
         });
+    }
+
+    /// Execute multiple statements sequentially, combining results
+    async fn execute_statements(
+        client: &DatabaseClient,
+        statements: Vec<String>,
+    ) -> crate::error::Result<QueryResult> {
+        let mut last_select: Option<QueryResult> = None;
+        let mut total_rows_affected: u64 = 0;
+
+        for stmt in statements {
+            let result = client.execute_query(&stmt).await?;
+            match result {
+                QueryResult::Select { .. } => {
+                    last_select = Some(result);
+                }
+                QueryResult::Execute { rows_affected } => {
+                    total_rows_affected += rows_affected;
+                }
+            }
+        }
+
+        // Return last SELECT result if any, otherwise return combined Execute result
+        Ok(last_select.unwrap_or(QueryResult::Execute {
+            rows_affected: total_rows_affected,
+        }))
     }
 
     pub fn is_read_query(query: &str) -> bool {

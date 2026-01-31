@@ -95,8 +95,9 @@ impl Controller {
     }
 
     pub(super) fn handle_database_view_keys(&mut self, key_event: KeyEvent) {
-        // Ctrl+h/j/k/l or Ctrl+arrows for pane navigation (works in all panes)
-        if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+        // Handle Ctrl-w + h/j/k/l for pane navigation (vim-style)
+        if self.pending_ctrl_w {
+            self.pending_ctrl_w = false;
             match key_event.code {
                 KeyCode::Char('h') | KeyCode::Left => {
                     self.focus_left();
@@ -114,8 +115,24 @@ impl Controller {
                     self.focus_down();
                     return;
                 }
-                _ => {}
+                KeyCode::Char('w') => {
+                    // Ctrl-w w cycles to next pane
+                    self.focus_right();
+                    return;
+                }
+                _ => {
+                    // Unknown key after Ctrl-w, ignore
+                    return;
+                }
             }
+        }
+
+        // Ctrl+w starts pane navigation sequence
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('w')
+        {
+            self.pending_ctrl_w = true;
+            return;
         }
 
         let focus = self.current_tab().focus;
@@ -355,7 +372,7 @@ impl Controller {
     }
 
     fn show_help(&mut self) {
-        let help = ":q quit | F5/Ctrl+R exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor | Ctrl+hjkl nav";
+        let help = ":q quit | F5/Ctrl+R exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor | Ctrl+w hjkl nav";
         self.current_tab_mut().status_message = Some(help.to_string());
     }
 
