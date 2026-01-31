@@ -1,3 +1,4 @@
+mod completion;
 mod database;
 mod input;
 mod navigation;
@@ -95,6 +96,12 @@ pub enum PopupState {
         row_index: usize,
         selected_field: usize,
         scroll: usize,
+    },
+    Completion {
+        suggestions: Vec<crate::completion::Suggestion>,
+        selected: usize,
+        /// Position in query where completion starts (to replace text)
+        word_start: usize,
     },
 }
 

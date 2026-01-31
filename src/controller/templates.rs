@@ -72,6 +72,13 @@ impl Controller {
             PopupState::RecordDetail { .. } => {
                 // Handled in handle_output_keys
             }
+            PopupState::Completion {
+                suggestions,
+                selected,
+                word_start,
+            } => {
+                self.handle_completion_keys(key_event, suggestions.clone(), *selected, *word_start);
+            }
             PopupState::None => {}
         }
     }

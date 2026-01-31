@@ -218,6 +218,7 @@ impl Controller {
                 KeyCode::Char('o') => self.open_template_popup(),
                 KeyCode::Char('s') => self.open_save_template_popup(),
                 KeyCode::Char('g') => self.edit_query_in_editor(),
+                KeyCode::Char(' ') => self.open_completion(),
                 KeyCode::Char('k') => {
                     self.query_textarea.delete_line_by_end();
                 }

@@ -1,6 +1,7 @@
 mod app;
 mod cassandra;
 mod clickhouse;
+mod completion;
 mod config;
 mod controller;
 mod db;
