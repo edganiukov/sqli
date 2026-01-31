@@ -16,8 +16,11 @@ A terminal-based SQL client. Supports multiple database backends.
 - Multi-tab interface.
 - Sidebar with databases and tables.
 - Query editor with external editor support.
+- SQL autocompletion (keywords, tables, columns).
+- Record detail popup for viewing full row data.
+- Mouse support for navigation.
 - TOML configuration file with password command support.
-- Query templates.
+- Query templates with placeholders.
 - External editor integration (`$EDITOR` or vim).
 
 ## Screenshots
@@ -32,6 +35,7 @@ A terminal-based SQL client. Supports multiple database backends.
 
 **Query Editor**
 - `F5` / `Ctrl+R` - execute query
+- `Ctrl+Space` - autocompletion (keywords, tables, columns)
 - `Ctrl+O` - open templates
 - `Ctrl+S` - save template
 - `Ctrl+G` - external editor
@@ -44,9 +48,22 @@ A terminal-based SQL client. Supports multiple database backends.
 - `r` - refresh the Sidebar
 
 **Output**
-- `j/k` - scroll
+- `j/k` - scroll rows
+- `h/l` - scroll columns
+- `^/$` - first/last column
 - `gg/G` - go top/bottom
 - `PageUp/Down` - page scroll
+- `Enter` - open record detail popup
+
+**Record Detail Popup**
+- `j/k` - navigate fields
+- `Esc` - close popup
+
+**Mouse**
+- Click on pane to focus
+- Click on table in sidebar to select
+- Click on row in output to open record detail
+- Click on connection/database to connect
 
 **Commands**
 - `:q` - quit a tab
@@ -130,6 +147,21 @@ SELECT * FROM <table> WHERE id = <id>;
 - Use `Ctrl+O` to open the templates list.
 - Use `/` to search templates by name (vim-style).
 - Use `Ctrl+G` to edit a template in your `$EDITOR` (edits name, scope, and query).
+
+## Autocompletion
+
+Press `Ctrl+Space` in the query editor to trigger autocompletion:
+
+- **Keywords** - SQL keywords (SELECT, FROM, WHERE, etc.)
+- **Tables** - tables from current database (context-aware after FROM/JOIN)
+- **Columns** - columns after typing `table.` or `alias.`
+
+The completion popup shows:
+- `k` - keyword
+- `t` - table
+- `c` - column
+
+Navigate with `j/k` or arrows, apply with `Enter` or `Tab`, cancel with `Esc`.
 
 ## Building
 
