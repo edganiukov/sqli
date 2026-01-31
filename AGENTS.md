@@ -35,6 +35,10 @@ cargo clippy              # Run linter
 cargo clippy --fix        # Auto-fix lint warnings
 ```
 
+## Git
+- Commit title in the following format - `<type>(<component>): <description>`
+  The type is one of: `feat` (for feature), fix, chore (refactoring, cleanup).
+
 ## Project Structure
 
 ```
