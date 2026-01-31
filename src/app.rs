@@ -312,15 +312,25 @@ impl App {
             .border_style(Style::default().fg(TEXT_DIM))
             .style(Style::default().bg(SURFACE));
 
+        // Render block and get inner area with horizontal padding
+        let inner_area = block.inner(list_area);
+        frame.render_widget(block, list_area);
+
+        let content_area = Rect {
+            x: inner_area.x + 1,
+            y: inner_area.y,
+            width: inner_area.width.saturating_sub(2),
+            height: inner_area.height,
+        };
+
         let list = List::new(items)
-            .block(block)
             .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
             .highlight_symbol("> ");
 
         let mut list_state = ListState::default();
         list_state.select(Some(tab.selected_index));
 
-        frame.render_stateful_widget(list, list_area, &mut list_state);
+        frame.render_stateful_widget(list, content_area, &mut list_state);
     }
 
     fn draw_database_list(&self, frame: &mut Frame, area: Rect) {
