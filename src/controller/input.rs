@@ -525,9 +525,10 @@ impl Controller {
             // Clicked on sidebar
             self.current_tab_mut().focus = Focus::Sidebar;
 
-            // Calculate which table was clicked (accounting for header)
+            // Calculate which table was clicked
+            // Subtract: tab bar (1) + sidebar title (1) + "Tables" header (1) = 3
             let table_count = self.current_tab().sidebar.tables.len();
-            let clicked_row = y.saturating_sub(2) as usize; // -1 for tab bar, -1 for "Tables" header
+            let clicked_row = y.saturating_sub(3) as usize;
 
             if clicked_row < table_count {
                 self.current_tab_mut().sidebar.selected = clicked_row;
