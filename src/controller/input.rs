@@ -1,5 +1,6 @@
 use super::{Controller, Focus, Mode, PopupState, ViewState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tui_textarea::CursorMove;
 
 impl Controller {
     pub fn handle_normal_mode(&mut self, key_event: KeyEvent) {
@@ -217,6 +218,15 @@ impl Controller {
                 KeyCode::Char('o') => self.open_template_popup(),
                 KeyCode::Char('s') => self.open_save_template_popup(),
                 KeyCode::Char('g') => self.edit_query_in_editor(),
+                KeyCode::Char('k') => {
+                    self.query_textarea.delete_line_by_end();
+                }
+                KeyCode::Left => {
+                    self.query_textarea.move_cursor(CursorMove::WordBack);
+                }
+                KeyCode::Right => {
+                    self.query_textarea.move_cursor(CursorMove::WordForward);
+                }
                 _ => {}
             }
             return;
