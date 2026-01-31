@@ -139,6 +139,10 @@ impl App {
         }
     }
 
+    pub fn handle_mouse(&mut self, mouse_event: crossterm::event::MouseEvent) {
+        self.controller.handle_mouse(mouse_event);
+    }
+
     pub fn tick_spinner(&mut self) {
         self.controller.tick_spinner();
     }

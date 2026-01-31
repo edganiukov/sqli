@@ -20,7 +20,7 @@ use clap::Parser;
 use controller::Controller;
 
 use crossterm::ExecutableCommand;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -55,13 +55,17 @@ fn main() -> io::Result<()> {
 
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
-    io::stdout().execute(EnterAlternateScreen)?;
+    io::stdout()
+        .execute(EnterAlternateScreen)?
+        .execute(EnableMouseCapture)?;
     Terminal::new(CrosstermBackend::new(io::stdout()))
 }
 
 fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
-    io::stdout().execute(LeaveAlternateScreen)?;
+    io::stdout()
+        .execute(DisableMouseCapture)?
+        .execute(LeaveAlternateScreen)?;
     Ok(())
 }
 
@@ -85,10 +89,14 @@ fn run(
 
         // Use poll with timeout to allow spinner animation
         if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                app.handle_key(key);
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    app.handle_key(key);
+                }
+                Event::Mouse(mouse) => {
+                    app.handle_mouse(mouse);
+                }
+                _ => {}
             }
         }
 

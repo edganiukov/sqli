@@ -1,5 +1,5 @@
 use super::{Controller, Focus, Mode, PopupState, ViewState};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use tui_textarea::CursorMove;
 
 impl Controller {
@@ -432,5 +432,131 @@ impl Controller {
             "Hiding system databases"
         };
         self.current_tab_mut().status_message = Some(msg.to_string());
+    }
+
+    pub fn handle_mouse(&mut self, event: MouseEvent) {
+        // Only handle left button clicks
+        if !matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+
+        let x = event.column;
+        let y = event.row;
+
+        // Get terminal size (approximate, since we don't have frame here)
+        let term_size = crossterm::terminal::size().unwrap_or((80, 24));
+        let term_height = term_size.1;
+
+        // Layout constants
+        const TAB_BAR_HEIGHT: u16 = 1;
+        const STATUS_LINE_HEIGHT: u16 = 1;
+        const COMMAND_LINE_HEIGHT: u16 = 1;
+
+        // Skip if clicking on tab bar, status, or command line
+        if y < TAB_BAR_HEIGHT || y >= term_height - STATUS_LINE_HEIGHT - COMMAND_LINE_HEIGHT {
+            return;
+        }
+
+        let view_state = self.current_tab().view_state;
+
+        match view_state {
+            ViewState::ConnectionList => {
+                self.handle_mouse_connection_list(x, y, term_size);
+            }
+            ViewState::DatabaseList => {
+                self.handle_mouse_database_list(x, y, term_size);
+            }
+            ViewState::DatabaseView => {
+                self.handle_mouse_database_view(x, y, term_size);
+            }
+        }
+    }
+
+    fn handle_mouse_connection_list(&mut self, _x: u16, y: u16, term_size: (u16, u16)) {
+        let tab = self.current_tab();
+        let conn_count = tab.connections.len();
+        if conn_count == 0 {
+            return;
+        }
+
+        // Connection list is centered
+        let list_height = (conn_count as u16 + 4).min(term_size.1 - 4);
+        let list_y = 1 + (term_size.1 - 4 - list_height) / 2;
+
+        // Check if click is within the list area
+        if y >= list_y + 2 && y < list_y + 2 + conn_count as u16 {
+            let clicked_index = (y - list_y - 2) as usize;
+            if clicked_index < conn_count {
+                self.current_tab_mut().selected_index = clicked_index;
+                // Double-click effect: connect immediately
+                self.initiate_connection();
+            }
+        }
+    }
+
+    fn handle_mouse_database_list(&mut self, _x: u16, y: u16, term_size: (u16, u16)) {
+        let tab = self.current_tab();
+        let db_count = tab.databases.len();
+        if db_count == 0 {
+            return;
+        }
+
+        // Database list is centered
+        let list_height = (db_count as u16 + 4).min(term_size.1 - 4);
+        let list_y = 1 + (term_size.1 - 4 - list_height) / 2;
+
+        // Check if click is within the list area
+        if y >= list_y + 2 && y < list_y + 2 + db_count as u16 {
+            let clicked_index = (y - list_y - 2) as usize;
+            if clicked_index < db_count {
+                self.current_tab_mut().database_selected = clicked_index;
+                // Connect to selected database
+                self.connect_to_selected_database_from_list();
+            }
+        }
+    }
+
+    fn handle_mouse_database_view(&mut self, x: u16, y: u16, term_size: (u16, u16)) {
+        const SIDEBAR_WIDTH: u16 = 40;
+        let main_area_height = term_size.1 - 3; // minus tab bar, status, command
+        let query_height = main_area_height * 35 / 100;
+
+        if x < SIDEBAR_WIDTH {
+            // Clicked on sidebar
+            self.current_tab_mut().focus = Focus::Sidebar;
+
+            // Calculate which table was clicked (accounting for header)
+            let table_count = self.current_tab().sidebar.tables.len();
+            let clicked_row = y.saturating_sub(2) as usize; // -1 for tab bar, -1 for "Tables" header
+
+            if clicked_row < table_count {
+                self.current_tab_mut().sidebar.selected = clicked_row;
+                // Select the table (same as Enter)
+                self.select_table();
+            }
+        } else if y < 1 + query_height {
+            // Clicked on query area
+            self.current_tab_mut().focus = Focus::Query;
+        } else {
+            // Clicked on output area
+            self.current_tab_mut().focus = Focus::Output;
+
+            // Calculate which row was clicked
+            // Output area starts after: tab bar (1) + query area (query_height)
+            // Then inside output: header row (1), then data rows
+            let output_y_start = 1 + query_height;
+            let clicked_row = (y - output_y_start).saturating_sub(2) as usize; // -1 for title, -1 for header
+
+            let tab = self.current_tab_mut();
+            if let Some(crate::db::QueryResult::Select { rows, .. }) = &tab.query_result {
+                let actual_row = tab.result_scroll + clicked_row;
+                if actual_row < rows.len() {
+                    tab.result_cursor = actual_row;
+                }
+            }
+
+            // Open record detail popup
+            self.open_record_detail();
+        }
     }
 }
