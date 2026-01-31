@@ -558,13 +558,22 @@ impl App {
                         remaining_width = remaining_width.saturating_sub(col_w);
                     }
 
+                    let selected_col = tab.result_selected_col;
+
                     let header_cells = visible_col_indices
                         .iter()
                         .zip(visible_col_widths.iter())
                         .map(|(&col_idx, &w)| {
                             let text = truncate_str(&columns[col_idx], w.saturating_sub(1));
-                            Cell::from(text)
-                                .style(Style::default().fg(WARNING).add_modifier(Modifier::BOLD))
+                            let style = if col_idx == selected_col && is_focused {
+                                Style::default()
+                                    .fg(ACCENT)
+                                    .bg(HIGHLIGHT)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(WARNING).add_modifier(Modifier::BOLD)
+                            };
+                            Cell::from(text).style(style)
                         });
                     let header = Row::new(header_cells)
                         .height(1)
@@ -581,6 +590,7 @@ impl App {
                         .skip(scroll)
                         .take(visible_height)
                         .map(|(idx, row)| {
+                            let is_cursor_row = idx == cursor && is_focused;
                             let cells = visible_col_indices
                                 .iter()
                                 .zip(visible_col_widths.iter())
@@ -588,10 +598,19 @@ impl App {
                                     let cell_text =
                                         row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
                                     let text = truncate_str(cell_text, w.saturating_sub(1));
-                                    Cell::from(text).style(Style::default().fg(TEXT))
+                                    let style = if col_idx == selected_col && is_cursor_row {
+                                        // Selected cell (current row + current column)
+                                        Style::default().fg(TEXT).bg(BLUE)
+                                    } else if col_idx == selected_col && is_focused {
+                                        // Selected column, other rows
+                                        Style::default().fg(TEXT).bg(HIGHLIGHT)
+                                    } else {
+                                        Style::default().fg(TEXT)
+                                    };
+                                    Cell::from(text).style(style)
                                 });
                             let row = Row::new(cells).height(1);
-                            if idx == cursor && is_focused {
+                            if is_cursor_row {
                                 row.style(Style::default().bg(HIGHLIGHT))
                             } else {
                                 row.style(Style::default().bg(bg_color))
@@ -642,8 +661,8 @@ impl App {
             PopupState::ConfirmDelete { name, .. } => {
                 self.draw_confirm_delete_popup(frame, name);
             }
-            PopupState::RecordDetail { row_index, scroll } => {
-                self.draw_record_detail_popup(frame, *row_index, *scroll);
+            PopupState::RecordDetail { row_index, selected_field, scroll } => {
+                self.draw_record_detail_popup(frame, *row_index, *selected_field, *scroll);
             }
             PopupState::None => {}
         }
@@ -807,7 +826,13 @@ impl App {
         );
     }
 
-    fn draw_record_detail_popup(&self, frame: &mut Frame, row_index: usize, scroll: usize) {
+    fn draw_record_detail_popup(
+        &self,
+        frame: &mut Frame,
+        row_index: usize,
+        selected_field: usize,
+        scroll: usize,
+    ) {
         let tab = self.controller.current_tab();
 
         let Some(QueryResult::Select { columns, rows }) = &tab.query_result else {
@@ -823,7 +848,13 @@ impl App {
         let popup_area = centered_rect_pct(area, 0.9, 0.8, 60, 20);
         frame.render_widget(Clear, popup_area);
 
-        let title = format!("Record {} of {}", row_index + 1, rows.len());
+        let title = format!(
+            "Record {} of {} ── Field {} of {}",
+            row_index + 1,
+            rows.len(),
+            selected_field + 1,
+            columns.len()
+        );
         let block = popup_block(&title, BLUE);
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
@@ -832,20 +863,41 @@ impl App {
         let max_name_width = columns.iter().map(|c| c.len()).max().unwrap_or(0);
         let value_width = inner.width.saturating_sub(max_name_width as u16 + 4) as usize; // 4 for " : " and padding
 
-        // Build lines for each field, wrapping long values
+        // Build lines for each field, tracking which line each field starts at
         let mut lines: Vec<Line> = Vec::new();
-        for (col, value) in columns.iter().zip(row.iter()) {
-            // First line includes the field name
+        let mut field_start_lines: Vec<usize> = Vec::new();
+
+        for (field_idx, (col, value)) in columns.iter().zip(row.iter()).enumerate() {
+            field_start_lines.push(lines.len());
+
+            let is_selected = field_idx == selected_field;
             let field_name = format!("{:>width$}", col, width = max_name_width);
+
+            // Style based on selection
+            let name_style = if is_selected {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(WARNING)
+            };
+            let value_style = if is_selected {
+                Style::default().fg(TEXT).bg(HIGHLIGHT)
+            } else {
+                Style::default().fg(TEXT)
+            };
+            let empty_style = if is_selected {
+                Style::default()
+                    .fg(TEXT_DIM)
+                    .bg(HIGHLIGHT)
+                    .add_modifier(Modifier::ITALIC)
+            } else {
+                Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)
+            };
 
             if value.is_empty() {
                 lines.push(Line::from(vec![
-                    Span::styled(field_name, Style::default().fg(WARNING)),
+                    Span::styled(field_name, name_style),
                     Span::styled(" : ", Style::default().fg(TEXT_DIM)),
-                    Span::styled(
-                        "(empty)",
-                        Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC),
-                    ),
+                    Span::styled("(empty)", empty_style),
                 ]));
             } else {
                 // Wrap long values
@@ -853,16 +905,16 @@ impl App {
                 for (i, line_text) in value_lines.iter().enumerate() {
                     if i == 0 {
                         lines.push(Line::from(vec![
-                            Span::styled(field_name.clone(), Style::default().fg(WARNING)),
+                            Span::styled(field_name.clone(), name_style),
                             Span::styled(" : ", Style::default().fg(TEXT_DIM)),
-                            Span::styled(line_text.clone(), Style::default().fg(TEXT)),
+                            Span::styled(line_text.clone(), value_style),
                         ]));
                     } else {
                         // Continuation lines - indent to align with value
                         let indent = " ".repeat(max_name_width + 3);
                         lines.push(Line::from(vec![
                             Span::styled(indent, Style::default()),
-                            Span::styled(line_text.clone(), Style::default().fg(TEXT)),
+                            Span::styled(line_text.clone(), value_style),
                         ]));
                     }
                 }
@@ -871,13 +923,26 @@ impl App {
             lines.push(Line::from(""));
         }
 
-        // Clamp scroll to valid range
-        let max_scroll = lines.len().saturating_sub(inner.height as usize);
-        let actual_scroll = scroll.min(max_scroll);
-
-        // Show scroll indicator in the content if there's more content
-        let total_lines = lines.len();
+        // Auto-scroll to keep selected field visible
         let visible_lines = inner.height as usize;
+        let selected_line = field_start_lines.get(selected_field).copied().unwrap_or(0);
+
+        let actual_scroll = if selected_line < scroll {
+            // Selected field is above viewport - scroll up
+            selected_line
+        } else if selected_line >= scroll + visible_lines {
+            // Selected field is below viewport - scroll down
+            selected_line.saturating_sub(visible_lines / 2)
+        } else {
+            // Keep current scroll if selected is visible
+            scroll
+        };
+
+        // Clamp scroll to valid range
+        let max_scroll = lines.len().saturating_sub(visible_lines);
+        let actual_scroll = actual_scroll.min(max_scroll);
+
+        let total_lines = lines.len();
 
         let paragraph = Paragraph::new(lines)
             .style(Style::default().bg(SURFACE))

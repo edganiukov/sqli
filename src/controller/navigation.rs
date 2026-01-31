@@ -113,54 +113,93 @@ impl Controller {
         {
             self.popup_state = PopupState::RecordDetail {
                 row_index: tab.result_cursor,
+                selected_field: 0,
                 scroll: 0,
             };
         }
     }
 
-    /// Calculate max horizontal scroll based on column widths
-    fn calc_max_h_scroll(&self) -> usize {
+    pub(super) fn move_column_to_end(&mut self) {
         let tab = self.current_tab();
-        if let Some(QueryResult::Select { columns, rows }) = &tab.query_result {
-            const MIN_COL_WIDTH: usize = 12;
-            const MAX_COL_WIDTH: usize = 50;
 
-            // Calculate column widths (same logic as rendering)
-            let mut col_widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
-            for row in rows.iter() {
-                for (i, cell) in row.iter().enumerate() {
-                    if i < col_widths.len() {
-                        col_widths[i] = col_widths[i].max(cell.len());
+        let (total_width, max_col) = match &tab.query_result {
+            Some(QueryResult::Select { columns, rows }) => {
+                const MIN_COL_WIDTH: usize = 12;
+                const MAX_COL_WIDTH: usize = 50;
+
+                let mut widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
+                for row in rows.iter() {
+                    for (i, cell) in row.iter().enumerate() {
+                        if i < widths.len() {
+                            widths[i] = widths[i].max(cell.len());
+                        }
                     }
                 }
+                for w in widths.iter_mut() {
+                    *w = (*w + 2).clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
+                }
+                let total: usize = widths.iter().sum();
+                (total, columns.len().saturating_sub(1))
             }
-            for w in col_widths.iter_mut() {
-                *w = (*w + 2).clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
-            }
+            _ => return,
+        };
 
-            let total_width: usize = col_widths.iter().sum();
-            // Assume ~80 chars visible width as approximation (actual width set during render)
-            // This is a reasonable default; the render will clamp if needed
-            let available_width = 80;
-            total_width.saturating_sub(available_width)
-        } else {
-            0
-        }
+        let tab = self.current_tab_mut();
+        tab.result_selected_col = max_col;
+
+        // Scroll to show the last column
+        let visible_width = 80usize;
+        tab.result_h_scroll = total_width.saturating_sub(visible_width);
     }
 
-    pub(super) fn scroll_horizontal(&mut self, delta: i32) {
-        let max_scroll = self.calc_max_h_scroll();
+    pub(super) fn move_column(&mut self, delta: i32) {
+        let tab = self.current_tab();
+
+        // Get column info from query result
+        let (col_widths, max_col) = match &tab.query_result {
+            Some(QueryResult::Select { columns, rows }) => {
+                const MIN_COL_WIDTH: usize = 12;
+                const MAX_COL_WIDTH: usize = 50;
+
+                let mut widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
+                for row in rows.iter() {
+                    for (i, cell) in row.iter().enumerate() {
+                        if i < widths.len() {
+                            widths[i] = widths[i].max(cell.len());
+                        }
+                    }
+                }
+                for w in widths.iter_mut() {
+                    *w = (*w + 2).clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
+                }
+                (widths, columns.len().saturating_sub(1))
+            }
+            _ => return,
+        };
+
         let tab = self.current_tab_mut();
 
+        // Update selected column
         if delta > 0 {
-            tab.result_h_scroll = (tab.result_h_scroll + delta as usize).min(max_scroll);
+            tab.result_selected_col = (tab.result_selected_col + delta as usize).min(max_col);
         } else {
-            tab.result_h_scroll = tab.result_h_scroll.saturating_sub((-delta) as usize);
+            tab.result_selected_col = tab.result_selected_col.saturating_sub((-delta) as usize);
         }
-    }
 
-    pub(super) fn scroll_horizontal_to_end(&mut self) {
-        let max_scroll = self.calc_max_h_scroll();
-        self.current_tab_mut().result_h_scroll = max_scroll;
+        // Calculate position of selected column
+        let col_start: usize = col_widths.iter().take(tab.result_selected_col).sum();
+        let col_end = col_start + col_widths.get(tab.result_selected_col).copied().unwrap_or(0);
+
+        // Auto-scroll to keep selected column visible (assume ~80 char visible width)
+        // The actual visible width will be set during render, but this is a reasonable default
+        let visible_width = 80usize;
+
+        if col_start < tab.result_h_scroll {
+            // Column is to the left of viewport
+            tab.result_h_scroll = col_start;
+        } else if col_end > tab.result_h_scroll + visible_width {
+            // Column is to the right of viewport
+            tab.result_h_scroll = col_end.saturating_sub(visible_width);
+        }
     }
 }

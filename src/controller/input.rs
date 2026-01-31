@@ -251,32 +251,60 @@ impl Controller {
 
     fn handle_output_keys(&mut self, key_code: KeyCode) {
         // Handle record detail popup first
-        if let PopupState::RecordDetail { scroll, .. } = &mut self.popup_state {
+        if let PopupState::RecordDetail {
+            row_index,
+            selected_field,
+            scroll,
+        } = &self.popup_state
+        {
+            // Get max field count from current query result
+            let max_field = self
+                .current_tab()
+                .query_result
+                .as_ref()
+                .map(|r| match r {
+                    crate::db::QueryResult::Select { columns, .. } => {
+                        columns.len().saturating_sub(1)
+                    }
+                    _ => 0,
+                })
+                .unwrap_or(0);
+
+            let row_index = *row_index;
+            let mut new_selected = *selected_field;
+            let scroll = *scroll;
+
             match key_code {
                 KeyCode::Esc => {
                     self.popup_state = PopupState::None;
+                    return;
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    *scroll = scroll.saturating_add(1);
+                    new_selected = (new_selected + 1).min(max_field);
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    *scroll = scroll.saturating_sub(1);
+                    new_selected = new_selected.saturating_sub(1);
                 }
                 KeyCode::Char('g') => {
-                    *scroll = 0;
+                    new_selected = 0;
                 }
                 KeyCode::Char('G') => {
-                    // Set to large value, rendering will clamp it
-                    *scroll = usize::MAX;
+                    new_selected = max_field;
                 }
                 KeyCode::PageDown => {
-                    *scroll = scroll.saturating_add(10);
+                    new_selected = (new_selected + 10).min(max_field);
                 }
                 KeyCode::PageUp => {
-                    *scroll = scroll.saturating_sub(10);
+                    new_selected = new_selected.saturating_sub(10);
                 }
                 _ => {}
             }
+
+            self.popup_state = PopupState::RecordDetail {
+                row_index,
+                selected_field: new_selected,
+                scroll,
+            };
             return;
         }
 
@@ -312,10 +340,10 @@ impl Controller {
                 self.move_cursor(-1, VISIBLE_HEIGHT);
             }
             KeyCode::Char('h') | KeyCode::Left => {
-                self.scroll_horizontal(-4);
+                self.move_column(-1);
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                self.scroll_horizontal(4);
+                self.move_column(1);
             }
             KeyCode::PageDown => {
                 self.move_cursor(10, VISIBLE_HEIGHT);
@@ -323,11 +351,12 @@ impl Controller {
             KeyCode::PageUp => {
                 self.move_cursor(-10, VISIBLE_HEIGHT);
             }
-            KeyCode::Char('0') => {
+            KeyCode::Char('^') => {
+                self.current_tab_mut().result_selected_col = 0;
                 self.current_tab_mut().result_h_scroll = 0;
             }
             KeyCode::Char('$') => {
-                self.scroll_horizontal_to_end();
+                self.move_column_to_end();
             }
             KeyCode::Char('g') => {
                 self.current_tab_mut().pending_g = true;

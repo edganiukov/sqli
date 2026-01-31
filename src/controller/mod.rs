@@ -93,6 +93,7 @@ pub enum PopupState {
     },
     RecordDetail {
         row_index: usize,
+        selected_field: usize,
         scroll: usize,
     },
 }
@@ -206,6 +207,7 @@ pub struct Tab {
     pub result_scroll: usize,
     pub result_cursor: usize,
     pub result_h_scroll: usize,
+    pub result_selected_col: usize,
     pub pending_g: bool,
     pub status_message: Option<String>,
     pub show_system_databases: bool,
@@ -229,6 +231,7 @@ impl Tab {
             result_scroll: 0,
             result_cursor: 0,
             result_h_scroll: 0,
+            result_selected_col: 0,
             pending_g: false,
             status_message: None,
             show_system_databases: false,
