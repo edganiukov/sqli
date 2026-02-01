@@ -448,12 +448,17 @@ impl Controller {
         let term_height = term_size.1;
 
         // Layout constants
-        const TAB_BAR_HEIGHT: u16 = 1;
         const STATUS_LINE_HEIGHT: u16 = 1;
         const COMMAND_LINE_HEIGHT: u16 = 1;
 
-        // Skip if clicking on tab bar, status, or command line
-        if y < TAB_BAR_HEIGHT || y >= term_height - STATUS_LINE_HEIGHT - COMMAND_LINE_HEIGHT {
+        // Handle tab bar clicks (row 0)
+        if y == 0 {
+            self.handle_mouse_tab_bar(x);
+            return;
+        }
+
+        // Skip if clicking on status or command line
+        if y >= term_height - STATUS_LINE_HEIGHT - COMMAND_LINE_HEIGHT {
             return;
         }
 
@@ -469,6 +474,23 @@ impl Controller {
             ViewState::DatabaseView => {
                 self.handle_mouse_database_view(x, y, term_size);
             }
+        }
+    }
+
+    fn handle_mouse_tab_bar(&mut self, x: u16) {
+        // Tabs are rendered as " TabName " with a space separator
+        // Calculate which tab was clicked
+        let mut current_x = 0u16;
+        
+        for (i, tab) in self.tabs.iter().enumerate() {
+            let tab_width = (tab.name.len() + 2) as u16; // " TabName "
+            
+            if x >= current_x && x < current_x + tab_width {
+                self.current_tab = i;
+                return;
+            }
+            
+            current_x += tab_width + 1; // +1 for separator space
         }
     }
 

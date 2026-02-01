@@ -403,7 +403,7 @@ impl Controller {
                                 db_name,
                                 tables.len()
                             );
-                            tab.name = format!("{} > {}", conn_name, db_name);
+                            tab.name = conn_name;
                             tab.current_database = Some(db_name);
                             tab.db_client = Some(Arc::new(client));
                             tab.sidebar.tables = tables;
