@@ -13,11 +13,26 @@ impl Controller {
     /// Step 1: User selects a connection - either connect directly (if database configured)
     /// or fetch list of databases for selection
     pub(super) fn initiate_connection(&mut self) {
-        let tab = self.current_tab_mut();
-        let conn = match tab.connections.get(tab.selected_index) {
-            Some(c) => c.clone(),
-            None => return,
+        let (conn, actual_index) = {
+            let tab = self.current_tab();
+            let filtered = tab.filtered_connections();
+            let conn = match filtered.get(tab.selected_index) {
+                Some(c) => (*c).clone(),
+                None => return,
+            };
+
+            // Find the actual index in connections vec for later lookups
+            let actual_index = tab
+                .connections
+                .iter()
+                .position(|c| c.name == conn.name)
+                .unwrap_or(0);
+            (conn, actual_index)
         };
+
+        // Store the actual index for database operations after connection
+        let tab = self.current_tab_mut();
+        tab.selected_index = actual_index;
 
         debug_log!(
             "Initiating connection to {} ({}://{}:{})",

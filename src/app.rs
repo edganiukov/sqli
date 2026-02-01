@@ -266,8 +266,9 @@ impl App {
 
     fn draw_connection_list(&self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
-        let items: Vec<ListItem> = tab
-            .connections
+        let filtered = tab.filtered_connections();
+
+        let items: Vec<ListItem> = filtered
             .iter()
             .map(|conn| {
                 ListItem::new(Line::from(vec![
@@ -295,9 +296,13 @@ impl App {
             height: area.height.saturating_sub(PADDING),
         };
 
-        // Calculate centered area.
+        // Calculate centered area - size based on largest group (or all connections)
         let list_width = 60.min(padded_area.width);
-        let list_height = (tab.connections.len() as u16 + 4).min(padded_area.height);
+        let has_groups = tab.connection_groups.len() > 1;
+        let extra_height = if has_groups { 2 } else { 0 }; // 1 for tabs, 1 for spacing
+        // Use total connections count for consistent sizing
+        let list_height =
+            (tab.connections.len() as u16 + 4 + extra_height).min(padded_area.height);
 
         let list_x = padded_area.x + (padded_area.width.saturating_sub(list_width)) / 2;
         let list_y = padded_area.y + (padded_area.height.saturating_sub(list_height)) / 2;
@@ -328,14 +333,61 @@ impl App {
             height: inner_area.height,
         };
 
-        let list = List::new(items)
-            .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
-            .highlight_symbol("> ");
+        // If we have groups, draw group tabs at the top
+        if has_groups {
+            let tabs_area = Rect {
+                x: content_area.x,
+                y: content_area.y,
+                width: content_area.width,
+                height: 1,
+            };
 
-        let mut list_state = ListState::default();
-        list_state.select(Some(tab.selected_index));
+            let mut spans = vec![];
+            for (i, group) in tab.connection_groups.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(" │ ", Style::default().fg(TEXT_DIM)));
+                }
+                let style = if i == tab.selected_group {
+                    Style::default()
+                        .fg(ACCENT)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                } else {
+                    Style::default().fg(TEXT_DIM)
+                };
+                spans.push(Span::styled(group, style));
+            }
 
-        frame.render_stateful_widget(list, content_area, &mut list_state);
+            let group_tabs = Paragraph::new(Line::from(spans));
+            frame.render_widget(group_tabs, tabs_area);
+
+            // Adjust list area to be below group tabs
+            let list_content_area = Rect {
+                x: content_area.x,
+                y: content_area.y + 2,
+                width: content_area.width,
+                height: content_area.height.saturating_sub(2),
+            };
+
+            let list = List::new(items)
+                .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
+                .highlight_symbol("> ");
+
+            let mut list_state = ListState::default();
+            list_state.select(Some(
+                tab.selected_index.min(filtered.len().saturating_sub(1)),
+            ));
+
+            frame.render_stateful_widget(list, list_content_area, &mut list_state);
+        } else {
+            let list = List::new(items)
+                .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
+                .highlight_symbol("> ");
+
+            let mut list_state = ListState::default();
+            list_state.select(Some(tab.selected_index));
+
+            frame.render_stateful_widget(list, content_area, &mut list_state);
+        }
     }
 
     fn draw_database_list(&self, frame: &mut Frame, area: Rect) {

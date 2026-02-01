@@ -4,6 +4,7 @@ host = "localhost"
 port = 5432
 user = "postgres"
 password = "password"
+group = "Local"
 
 # Example with database specified - skips database selection
 [postgres-mydb]
@@ -13,6 +14,7 @@ port = 5432
 user = "postgres"
 password = "password"
 database = "mydb"
+group = "Local"
 
 [mysql]
 type = "mysql"
@@ -21,11 +23,13 @@ port = 3306
 user = "root"
 password = "password"
 readonly = true
+group = "Local"
 
 [scylla]
 type = "cassandra"
 host = "localhost"
 port = 9042
+group = "NoSQL"
 
 [clickhouse]
 type = "clickhouse"
@@ -33,3 +37,14 @@ host = "localhost"
 port = 8123
 user = "default"
 password = "password"
+group = "Analytics"
+
+# Example production connection (different group)
+[prod-postgres]
+type = "postgres"
+host = "prod-db.example.com"
+port = 5432
+user = "readonly"
+password = "secret"
+readonly = true
+group = "Prod"

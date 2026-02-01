@@ -53,6 +53,12 @@ impl Controller {
             KeyCode::Char('k') | KeyCode::Up => {
                 self.current_tab_mut().select_previous();
             }
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.current_tab_mut().prev_group();
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.current_tab_mut().next_group();
+            }
             KeyCode::Char('t') => {
                 self.new_tab();
             }
@@ -493,11 +499,11 @@ impl Controller {
 
         match view_state {
             ViewState::ConnectionList => {
-                let tab = self.current_tab_mut();
-                let count = tab.connections.len();
+                let count = self.current_tab().filtered_connections().len();
                 if count == 0 {
                     return;
                 }
+                let tab = self.current_tab_mut();
                 if scroll_up {
                     tab.selected_index = tab.selected_index.saturating_sub(SCROLL_AMOUNT);
                 } else {
@@ -568,19 +574,26 @@ impl Controller {
 
     fn handle_mouse_connection_list(&mut self, _x: u16, y: u16, term_size: (u16, u16)) {
         let tab = self.current_tab();
-        let conn_count = tab.connections.len();
-        if conn_count == 0 {
+        let filtered = tab.filtered_connections();
+        let filtered_count = filtered.len();
+        if filtered_count == 0 {
             return;
         }
 
-        // Connection list is centered
-        let list_height = (conn_count as u16 + 4).min(term_size.1 - 4);
+        // Account for group tabs if present
+        let has_groups = tab.connection_groups.len() > 1;
+        let extra_offset = if has_groups { 2 } else { 0 }; // tabs + spacing
+
+        // Connection list is centered - sized to total connections for consistency
+        let total_count = tab.connections.len();
+        let list_height = (total_count as u16 + 4 + extra_offset as u16).min(term_size.1 - 4);
         let list_y = 1 + (term_size.1 - 4 - list_height) / 2;
 
-        // Check if click is within the list area
-        if y >= list_y + 2 && y < list_y + 2 + conn_count as u16 {
-            let clicked_index = (y - list_y - 2) as usize;
-            if clicked_index < conn_count {
+        // Check if click is within the list area (after tabs/hint if present)
+        let list_content_y = list_y + 2 + extra_offset as u16;
+        if y >= list_content_y && y < list_content_y + filtered_count as u16 {
+            let clicked_index = (y - list_content_y) as usize;
+            if clicked_index < filtered_count {
                 self.current_tab_mut().selected_index = clicked_index;
                 // Double-click effect: connect immediately
                 self.initiate_connection();

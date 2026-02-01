@@ -145,6 +145,7 @@ pub struct DatabaseConn {
     pub database: Option<String>,
     pub tls: bool,
     pub readonly: bool,
+    pub group: Option<String>,
 }
 
 impl DatabaseConn {
@@ -220,10 +221,29 @@ pub struct Tab {
     pub status_message: Option<String>,
     pub show_system_databases: bool,
     pub loading: bool,
+    // Connection grouping
+    pub connection_groups: Vec<String>, // list of group names (first is "All")
+    pub selected_group: usize,          // index in connection_groups
 }
 
 impl Tab {
     pub fn new(connections: Vec<DatabaseConn>) -> Self {
+        // Build list of unique groups
+        let mut groups: Vec<String> = vec!["All".to_string()];
+        for conn in &connections {
+            if let Some(ref group) = conn.group
+                && !groups.contains(group)
+            {
+                groups.push(group.clone());
+            }
+        }
+        // Add "Ungrouped" if there are connections without a group and we have groups
+        let has_ungrouped = connections.iter().any(|c| c.group.is_none());
+        let has_grouped = connections.iter().any(|c| c.group.is_some());
+        if has_ungrouped && has_grouped {
+            groups.push("Ungrouped".to_string());
+        }
+
         Self {
             name: "New".to_string(),
             connections,
@@ -245,15 +265,58 @@ impl Tab {
             status_message: None,
             show_system_databases: false,
             loading: false,
+            connection_groups: groups,
+            selected_group: 0,
+        }
+    }
+
+    /// Get connections filtered by the current selected group
+    pub fn filtered_connections(&self) -> Vec<&DatabaseConn> {
+        if self.selected_group == 0 {
+            // "All" group - return all connections
+            self.connections.iter().collect()
+        } else {
+            let group_name = &self.connection_groups[self.selected_group];
+            if group_name == "Ungrouped" {
+                self.connections
+                    .iter()
+                    .filter(|c| c.group.is_none())
+                    .collect()
+            } else {
+                self.connections
+                    .iter()
+                    .filter(|c| c.group.as_ref() == Some(group_name))
+                    .collect()
+            }
         }
     }
 
     pub fn select_next(&mut self) {
-        cycle_next(&mut self.selected_index, self.connections.len());
+        let count = self.filtered_connections().len();
+        cycle_next(&mut self.selected_index, count);
     }
 
     pub fn select_previous(&mut self) {
-        cycle_prev(&mut self.selected_index, self.connections.len());
+        let count = self.filtered_connections().len();
+        cycle_prev(&mut self.selected_index, count);
+    }
+
+    pub fn next_group(&mut self) {
+        if self.connection_groups.len() > 1 {
+            self.selected_group = (self.selected_group + 1) % self.connection_groups.len();
+            self.selected_index = 0; // Reset selection when switching groups
+        }
+    }
+
+    pub fn prev_group(&mut self) {
+        if self.connection_groups.len() > 1 {
+            self.selected_group = if self.selected_group == 0 {
+                self.connection_groups.len() - 1
+            } else {
+                self.selected_group - 1
+            };
+            self.selected_index = 0; // Reset selection when switching groups
+        }
     }
 
     pub fn sidebar_next(&mut self) {

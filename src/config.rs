@@ -23,6 +23,8 @@ pub struct ConnectionConfig {
     pub tls: bool,
     #[serde(default)]
     pub readonly: bool,
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 impl ConnectionConfig {
@@ -46,6 +48,7 @@ impl ConnectionConfig {
             database: self.database.clone(),
             tls: self.tls,
             readonly: self.readonly,
+            group: self.group.clone(),
         })
     }
 }
@@ -146,5 +149,6 @@ fn default_connections() -> Vec<DatabaseConn> {
         database: None,
         tls: false,
         readonly: false,
+        group: None,
     }]
 }
