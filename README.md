@@ -14,7 +14,7 @@ A terminal-based SQL client. Supports multiple database backends.
 ## Features
 
 - Multi-tab interface.
-- Sidebar with databases and tables.
+- Tables explorer.
 - Query editor with external editor support.
 - SQL autocompletion (keywords, tables, columns).
 - Record detail popup for viewing full row data.
@@ -60,10 +60,10 @@ A terminal-based SQL client. Supports multiple database backends.
 - `Esc` - close popup
 
 **Mouse**
-- Click on pane to focus
-- Click on table in sidebar to select
-- Click on row in output to open record detail
-- Click on connection/database to connect
+- Click on pane to focus.
+- Click on table in sidebar to select.
+- Click on row in output to open record detail.
+- Click on connection/database to connect.
 
 **Commands**
 - `:q` - quit a tab

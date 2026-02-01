@@ -435,11 +435,6 @@ impl Controller {
     }
 
     pub fn handle_mouse(&mut self, event: MouseEvent) {
-        // Only handle left button clicks
-        if !matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
-            return;
-        }
-
         let x = event.column;
         let y = event.row;
 
@@ -450,6 +445,18 @@ impl Controller {
         // Layout constants
         const STATUS_LINE_HEIGHT: u16 = 1;
         const COMMAND_LINE_HEIGHT: u16 = 1;
+
+        // Handle scroll events
+        if matches!(event.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
+            let scroll_up = matches!(event.kind, MouseEventKind::ScrollUp);
+            self.handle_mouse_scroll(x, y, scroll_up, term_size);
+            return;
+        }
+
+        // Only handle left button clicks for the rest
+        if !matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
 
         // Handle tab bar clicks (row 0)
         if y == 0 {
@@ -473,6 +480,49 @@ impl Controller {
             }
             ViewState::DatabaseView => {
                 self.handle_mouse_database_view(x, y, term_size);
+            }
+        }
+    }
+
+    fn handle_mouse_scroll(&mut self, x: u16, _y: u16, scroll_up: bool, term_size: (u16, u16)) {
+        let view_state = self.current_tab().view_state;
+
+        if view_state != ViewState::DatabaseView {
+            return;
+        }
+
+        const SIDEBAR_WIDTH: u16 = 40;
+        let main_area_height = term_size.1 - 3;
+        let query_height = main_area_height * 35 / 100;
+
+        if x < SIDEBAR_WIDTH {
+            // Scroll in sidebar
+            let tab = self.current_tab_mut();
+            let table_count = tab.sidebar.tables.len();
+            if table_count == 0 {
+                return;
+            }
+
+            if scroll_up {
+                tab.sidebar.selected = tab.sidebar.selected.saturating_sub(3);
+            } else {
+                tab.sidebar.selected = (tab.sidebar.selected + 3).min(table_count - 1);
+            }
+        } else if x >= SIDEBAR_WIDTH {
+            // Determine if in query or output area based on focus or default to output
+            let tab = self.current_tab();
+            let in_output = tab.focus == Focus::Output || x >= SIDEBAR_WIDTH;
+
+            if in_output {
+                // Scroll in output area
+                const SCROLL_AMOUNT: usize = 3;
+                let visible_height = (term_size.1 - 3 - query_height) as usize;
+                
+                if scroll_up {
+                    self.move_cursor(-(SCROLL_AMOUNT as i32), visible_height);
+                } else {
+                    self.move_cursor(SCROLL_AMOUNT as i32, visible_height);
+                }
             }
         }
     }
