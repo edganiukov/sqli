@@ -447,7 +447,10 @@ impl Controller {
         const COMMAND_LINE_HEIGHT: u16 = 1;
 
         // Handle scroll events
-        if matches!(event.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
+        if matches!(
+            event.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) {
             let scroll_up = matches!(event.kind, MouseEventKind::ScrollUp);
             self.handle_mouse_scroll(x, y, scroll_up, term_size);
             return;
@@ -529,12 +532,13 @@ impl Controller {
                     if scroll_up {
                         tab.sidebar.selected = tab.sidebar.selected.saturating_sub(SCROLL_AMOUNT);
                     } else {
-                        tab.sidebar.selected = (tab.sidebar.selected + SCROLL_AMOUNT).min(table_count - 1);
+                        tab.sidebar.selected =
+                            (tab.sidebar.selected + SCROLL_AMOUNT).min(table_count - 1);
                     }
                 } else {
                     // Scroll in output area
                     let visible_height = (term_size.1 - 3 - query_height) as usize;
-                    
+
                     if scroll_up {
                         self.move_cursor(-(SCROLL_AMOUNT as i32), visible_height);
                     } else {
