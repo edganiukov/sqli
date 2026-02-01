@@ -228,7 +228,8 @@ pub struct Tab {
 
 impl Tab {
     pub fn new(connections: Vec<DatabaseConn>) -> Self {
-        // Build list of unique groups
+        // Build list of unique groups, preserving order of first appearance in config.
+        // Connections are loaded via IndexMap which maintains TOML file order.
         let mut groups: Vec<String> = vec!["All".to_string()];
         for conn in &connections {
             if let Some(ref group) = conn.group
