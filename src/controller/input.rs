@@ -486,42 +486,60 @@ impl Controller {
 
     fn handle_mouse_scroll(&mut self, x: u16, _y: u16, scroll_up: bool, term_size: (u16, u16)) {
         let view_state = self.current_tab().view_state;
+        const SCROLL_AMOUNT: usize = 3;
 
-        if view_state != ViewState::DatabaseView {
-            return;
-        }
-
-        const SIDEBAR_WIDTH: u16 = 40;
-        let main_area_height = term_size.1 - 3;
-        let query_height = main_area_height * 35 / 100;
-
-        if x < SIDEBAR_WIDTH {
-            // Scroll in sidebar
-            let tab = self.current_tab_mut();
-            let table_count = tab.sidebar.tables.len();
-            if table_count == 0 {
-                return;
-            }
-
-            if scroll_up {
-                tab.sidebar.selected = tab.sidebar.selected.saturating_sub(3);
-            } else {
-                tab.sidebar.selected = (tab.sidebar.selected + 3).min(table_count - 1);
-            }
-        } else if x >= SIDEBAR_WIDTH {
-            // Determine if in query or output area based on focus or default to output
-            let tab = self.current_tab();
-            let in_output = tab.focus == Focus::Output || x >= SIDEBAR_WIDTH;
-
-            if in_output {
-                // Scroll in output area
-                const SCROLL_AMOUNT: usize = 3;
-                let visible_height = (term_size.1 - 3 - query_height) as usize;
-                
+        match view_state {
+            ViewState::ConnectionList => {
+                let tab = self.current_tab_mut();
+                let count = tab.connections.len();
+                if count == 0 {
+                    return;
+                }
                 if scroll_up {
-                    self.move_cursor(-(SCROLL_AMOUNT as i32), visible_height);
+                    tab.selected_index = tab.selected_index.saturating_sub(SCROLL_AMOUNT);
                 } else {
-                    self.move_cursor(SCROLL_AMOUNT as i32, visible_height);
+                    tab.selected_index = (tab.selected_index + SCROLL_AMOUNT).min(count - 1);
+                }
+            }
+            ViewState::DatabaseList => {
+                let tab = self.current_tab_mut();
+                let count = tab.databases.len();
+                if count == 0 {
+                    return;
+                }
+                if scroll_up {
+                    tab.database_selected = tab.database_selected.saturating_sub(SCROLL_AMOUNT);
+                } else {
+                    tab.database_selected = (tab.database_selected + SCROLL_AMOUNT).min(count - 1);
+                }
+            }
+            ViewState::DatabaseView => {
+                const SIDEBAR_WIDTH: u16 = 40;
+                let main_area_height = term_size.1 - 3;
+                let query_height = main_area_height * 35 / 100;
+
+                if x < SIDEBAR_WIDTH {
+                    // Scroll in sidebar
+                    let tab = self.current_tab_mut();
+                    let table_count = tab.sidebar.tables.len();
+                    if table_count == 0 {
+                        return;
+                    }
+
+                    if scroll_up {
+                        tab.sidebar.selected = tab.sidebar.selected.saturating_sub(SCROLL_AMOUNT);
+                    } else {
+                        tab.sidebar.selected = (tab.sidebar.selected + SCROLL_AMOUNT).min(table_count - 1);
+                    }
+                } else {
+                    // Scroll in output area
+                    let visible_height = (term_size.1 - 3 - query_height) as usize;
+                    
+                    if scroll_up {
+                        self.move_cursor(-(SCROLL_AMOUNT as i32), visible_height);
+                    } else {
+                        self.move_cursor(SCROLL_AMOUNT as i32, visible_height);
+                    }
                 }
             }
         }
