@@ -20,6 +20,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - Record detail popup for viewing full row data.
 - Mouse support for navigation.
 - TOML configuration file with password command support.
+- Connection grouping for organizing databases.
 - Query templates with placeholders.
 - External editor integration (`$EDITOR` or vim).
 
@@ -29,9 +30,14 @@ A terminal-based SQL client. Supports multiple database backends.
 
 ## Keybindings
 
+**Connection List**
+- `j/k` - navigate connections
+- `h/l` - switch groups
+- `Enter` - connect
+
 **Navigation**
 - `Tab` / `Shift+Tab` - cycle focus
-- `Ctrl+h/j/k/l` - directional focus
+- `Ctrl+w h/j/k/l` - directional focus
 
 **Query Editor**
 - `F5` / `Ctrl+R` - execute query
@@ -88,12 +94,14 @@ host = "localhost"
 port = 5432
 user = "postgres"
 password = "secret"
+group = "Local"
 
 [production]
 type = "postgres"
 host = "db.example.com"
 user = "admin"
 password_cmd = "pass show db/production"
+group = "Production"
 
 [local-mysql]
 type = "mysql"
@@ -101,12 +109,14 @@ host = "localhost"
 port = 3306
 user = "root"
 password = "secret"
+group = "Local"
 
 [analytics]
 type = "clickhouse"
 host = "clickhouse.local"
 port = 8123
 user = "default"
+group = "Analytics"
 
 [analytics-secure]
 type = "clickhouse"
@@ -114,6 +124,7 @@ host = "clickhouse.example.com"
 port = 8443
 user = "default"
 tls = true
+group = "Analytics"
 
 [scylla-cluster]
 type = "cassandra"
@@ -121,7 +132,25 @@ host = "scylla1.local"
 port = 9042
 user = "cassandra"
 password = "cassandra"
+group = "NoSQL"
 ```
+
+### Connection Options
+
+| Option | Description |
+|--------|-------------|
+| `type` | Database type: `postgres`, `mysql`, `cassandra`, `clickhouse` |
+| `host` | Server hostname |
+| `port` | Server port (optional, uses default for type) |
+| `user` | Username |
+| `password` | Password (plaintext) |
+| `password_cmd` | Command to retrieve password (e.g., `pass show db/prod`) |
+| `database` | Default database (skips database selection) |
+| `tls` | Enable TLS (default: false) |
+| `readonly` | Read-only mode, blocks non-SELECT queries (default: false) |
+| `group` | Group name for organizing connections (optional) |
+
+Groups are displayed as tabs in the connection list. Use `h/l` to switch between groups. Connections without a group appear under "Ungrouped" when other groups exist.
 
 ## Query Templates
 
