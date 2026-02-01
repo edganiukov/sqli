@@ -481,15 +481,15 @@ impl Controller {
         // Tabs are rendered as " TabName " with a space separator
         // Calculate which tab was clicked
         let mut current_x = 0u16;
-        
+
         for (i, tab) in self.tabs.iter().enumerate() {
             let tab_width = (tab.name.len() + 2) as u16; // " TabName "
-            
+
             if x >= current_x && x < current_x + tab_width {
                 self.current_tab = i;
                 return;
             }
-            
+
             current_x += tab_width + 1; // +1 for separator space
         }
     }

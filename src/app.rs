@@ -666,7 +666,11 @@ impl App {
             PopupState::ConfirmDelete { name, .. } => {
                 self.draw_confirm_delete_popup(frame, name);
             }
-            PopupState::RecordDetail { row_index, selected_field, scroll } => {
+            PopupState::RecordDetail {
+                row_index,
+                selected_field,
+                scroll,
+            } => {
                 self.draw_record_detail_popup(frame, *row_index, *selected_field, *scroll);
             }
             PopupState::Completion {
@@ -996,43 +1000,48 @@ impl App {
         }
     }
 
-    fn draw_completion_popup(&self, frame: &mut Frame, suggestions: &[Suggestion], selected: usize) {
+    fn draw_completion_popup(
+        &self,
+        frame: &mut Frame,
+        suggestions: &[Suggestion],
+        selected: usize,
+    ) {
         // Position popup near the cursor in the query textarea
         let area = frame.area();
-        
+
         // Calculate popup position based on cursor
         let (cursor_row, cursor_col) = self.controller.query_textarea.cursor();
-        
+
         // Query panel starts after sidebar (40 cols) + tab bar (1 row)
         // Textarea has line numbers (~3 chars)
         let base_x = 40u16 + 3; // sidebar + line numbers
-        let base_y = 2u16;      // tab bar + title
-        
+        let base_y = 2u16; // tab bar + title
+
         // Position popup below cursor line
         let popup_x = (base_x + cursor_col as u16).min(area.width.saturating_sub(32));
         let popup_y = (base_y + cursor_row as u16 + 1).min(area.height.saturating_sub(12));
-        
+
         let popup_width = 30u16;
         let popup_height = (suggestions.len() as u16).min(10);
-        
+
         let popup_area = Rect {
             x: popup_x,
             y: popup_y,
             width: popup_width.min(area.width.saturating_sub(popup_x)),
             height: popup_height.min(area.height.saturating_sub(popup_y)),
         };
-        
+
         frame.render_widget(Clear, popup_area);
-        
+
         // Simple border - just left edge, lighter background
         let block = Block::default()
             .borders(Borders::LEFT)
             .border_style(Style::default().fg(BLUE))
             .style(Style::default().bg(SURFACE_DIM));
-        
+
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
-        
+
         let items: Vec<ListItem> = suggestions
             .iter()
             .map(|s| {
@@ -1047,14 +1056,14 @@ impl App {
                 ]))
             })
             .collect();
-        
+
         let list = List::new(items)
             .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
             .highlight_symbol(">");
-        
+
         let mut list_state = ListState::default();
         list_state.select(Some(selected));
-        
+
         frame.render_stateful_widget(list, inner, &mut list_state);
     }
 }

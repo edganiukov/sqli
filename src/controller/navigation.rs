@@ -188,7 +188,11 @@ impl Controller {
 
         // Calculate position of selected column
         let col_start: usize = col_widths.iter().take(tab.result_selected_col).sum();
-        let col_end = col_start + col_widths.get(tab.result_selected_col).copied().unwrap_or(0);
+        let col_end = col_start
+            + col_widths
+                .get(tab.result_selected_col)
+                .copied()
+                .unwrap_or(0);
 
         // Auto-scroll to keep selected column visible (assume ~80 char visible width)
         // The actual visible width will be set during render, but this is a reasonable default

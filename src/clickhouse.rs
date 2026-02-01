@@ -172,9 +172,10 @@ impl ClickHouseClient {
         };
         let result = self.execute_query(&query).await?;
         match result {
-            QueryResult::Select { rows, .. } => {
-                Ok(rows.into_iter().filter_map(|r| r.into_iter().next()).collect())
-            }
+            QueryResult::Select { rows, .. } => Ok(rows
+                .into_iter()
+                .filter_map(|r| r.into_iter().next())
+                .collect()),
             _ => Ok(Vec::new()),
         }
     }
