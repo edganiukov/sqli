@@ -613,6 +613,7 @@ impl Controller {
 
         if x < SIDEBAR_WIDTH {
             // Clicked on sidebar
+            let was_focused = self.current_tab().focus == Focus::Sidebar;
             self.current_tab_mut().focus = Focus::Sidebar;
 
             // Calculate which table was clicked
@@ -622,14 +623,17 @@ impl Controller {
 
             if clicked_row < table_count {
                 self.current_tab_mut().sidebar.selected = clicked_row;
-                // Select the table (same as Enter)
-                self.select_table();
+                // Only select the table if sidebar was already focused
+                if was_focused {
+                    self.select_table();
+                }
             }
         } else if y < 1 + query_height {
             // Clicked on query area
             self.current_tab_mut().focus = Focus::Query;
         } else {
             // Clicked on output area
+            let was_focused = self.current_tab().focus == Focus::Output;
             self.current_tab_mut().focus = Focus::Output;
 
             // Calculate which row was clicked
@@ -646,8 +650,10 @@ impl Controller {
                 }
             }
 
-            // Open record detail popup
-            self.open_record_detail();
+            // Only open record detail popup if output was already focused
+            if was_focused {
+                self.open_record_detail();
+            }
         }
     }
 }
