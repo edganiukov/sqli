@@ -17,14 +17,13 @@ impl Controller {
         }
     }
 
-    /// Cancel any pending async operation. Returns true if something was cancelled.
+    /// Cancel any pending async operation on the current tab. Returns true if something was cancelled.
     fn cancel_pending_operation(&mut self) -> bool {
-        let Some(op) = self.pending_operation.take() else {
+        let tab = self.current_tab_mut();
+        let Some(op) = tab.pending_operation.take() else {
             return false;
         };
 
-        self.pending_escape = false;
-        let tab = self.current_tab_mut();
         tab.loading = false;
         tab.pending_g = false;
         tab.status_message = Some("Cancelled".to_string());
@@ -38,6 +37,8 @@ impl Controller {
             tab.name = "New".to_string();
             tab.databases.clear();
         }
+
+        self.pending_escape = false;
         true
     }
 

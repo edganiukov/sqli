@@ -68,7 +68,7 @@ impl Controller {
             let _ = tx.send(result);
         });
 
-        self.pending_operation = Some(PendingOperation::ListDatabases {
+        self.current_tab_mut().pending_operation = Some(PendingOperation::ListDatabases {
             receiver: rx,
             conn_name,
         });
@@ -100,7 +100,7 @@ impl Controller {
             let _ = tx.send(result);
         });
 
-        self.pending_operation = Some(PendingOperation::ListDatabases {
+        self.current_tab_mut().pending_operation = Some(PendingOperation::ListDatabases {
             receiver: rx,
             conn_name,
         });
@@ -158,7 +158,7 @@ impl Controller {
             let _ = tx.send(result);
         });
 
-        self.pending_operation = Some(PendingOperation::Connect {
+        self.current_tab_mut().pending_operation = Some(PendingOperation::Connect {
             receiver: rx,
             conn_name,
             db_name: db_name_clone,
@@ -212,7 +212,7 @@ impl Controller {
             let _ = tx.send(result);
         });
 
-        self.pending_operation = Some(PendingOperation::RefreshTables { receiver: rx });
+        self.current_tab_mut().pending_operation = Some(PendingOperation::RefreshTables { receiver: rx });
     }
 
     pub(super) fn select_table(&mut self) {
@@ -302,7 +302,7 @@ impl Controller {
             let _ = tx.send(result);
         });
 
-        self.pending_operation = Some(PendingOperation::Query {
+        self.current_tab_mut().pending_operation = Some(PendingOperation::Query {
             receiver: rx,
             start,
         });
