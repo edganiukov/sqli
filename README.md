@@ -150,7 +150,7 @@ group = "NoSQL"
 | `readonly` | Read-only mode, blocks non-SELECT queries (default: false) |
 | `group` | Group name for organizing connections (optional) |
 
-Groups are displayed as tabs in the connection list. Use `h/l` to switch between groups. Connections without a group appear under "Ungrouped" when other groups exist.
+Groups are displayed as tabs in the connection list. Use `h/l` to switch between groups. Connections without a group only appear under "All".
 
 ## Query Templates
 

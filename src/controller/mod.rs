@@ -230,6 +230,7 @@ impl Tab {
     pub fn new(connections: Vec<DatabaseConn>) -> Self {
         // Build list of unique groups, preserving order of first appearance in config.
         // Connections are loaded via IndexMap which maintains TOML file order.
+        // Connections without a group only appear under "All".
         let mut groups: Vec<String> = vec!["All".to_string()];
         for conn in &connections {
             if let Some(ref group) = conn.group
@@ -237,12 +238,6 @@ impl Tab {
             {
                 groups.push(group.clone());
             }
-        }
-        // Add "Ungrouped" if there are connections without a group and we have groups
-        let has_ungrouped = connections.iter().any(|c| c.group.is_none());
-        let has_grouped = connections.iter().any(|c| c.group.is_some());
-        if has_ungrouped && has_grouped {
-            groups.push("Ungrouped".to_string());
         }
 
         Self {
@@ -278,17 +273,10 @@ impl Tab {
             self.connections.iter().collect()
         } else {
             let group_name = &self.connection_groups[self.selected_group];
-            if group_name == "Ungrouped" {
-                self.connections
-                    .iter()
-                    .filter(|c| c.group.is_none())
-                    .collect()
-            } else {
-                self.connections
-                    .iter()
-                    .filter(|c| c.group.as_ref() == Some(group_name))
-                    .collect()
-            }
+            self.connections
+                .iter()
+                .filter(|c| c.group.as_ref() == Some(group_name))
+                .collect()
         }
     }
 
