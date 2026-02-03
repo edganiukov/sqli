@@ -457,6 +457,11 @@ impl Controller {
     }
 
     pub fn handle_mouse(&mut self, event: MouseEvent) {
+        // Block all mouse interaction when a popup is active
+        if !matches!(self.popup_state, PopupState::None) {
+            return;
+        }
+
         let x = event.column;
         let y = event.row;
 
