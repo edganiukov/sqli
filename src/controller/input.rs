@@ -675,16 +675,19 @@ impl Controller {
             let output_y_start = 1 + query_height;
             let clicked_row = (y - output_y_start).saturating_sub(2) as usize; // -1 for title, -1 for header
 
+            let mut clicked_valid_row = false;
             let tab = self.current_tab_mut();
             if let Some(crate::db::QueryResult::Select { rows, .. }) = &tab.query_result {
                 let actual_row = tab.result_scroll + clicked_row;
                 if actual_row < rows.len() {
                     tab.result_cursor = actual_row;
+                    clicked_valid_row = true;
                 }
             }
 
             // Only open record detail popup if output was already focused
-            if was_focused {
+            // and the click landed on an actual data row
+            if was_focused && clicked_valid_row {
                 self.open_record_detail();
             }
         }
