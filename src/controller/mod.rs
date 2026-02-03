@@ -194,6 +194,14 @@ impl DatabaseConn {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VisualSelect {
+    /// Select individual cells in a single column
+    Cell { anchor: usize },
+    /// Select entire rows
+    Line { anchor: usize },
+}
+
 #[derive(Debug, Default)]
 pub struct SidebarState {
     pub tables: Vec<String>,
@@ -218,6 +226,7 @@ pub struct Tab {
     pub result_h_scroll: usize,
     pub result_selected_col: usize,
     pub pending_g: bool,
+    pub visual_select: Option<VisualSelect>,
     pub status_message: Option<String>,
     pub show_system_databases: bool,
     pub loading: bool,
@@ -260,6 +269,7 @@ impl Tab {
             result_h_scroll: 0,
             result_selected_col: 0,
             pending_g: false,
+            visual_select: None,
             status_message: None,
             show_system_databases: false,
             loading: false,
@@ -326,6 +336,17 @@ impl Tab {
     pub fn database_prev(&mut self) {
         cycle_prev(&mut self.database_selected, self.databases.len());
     }
+
+    /// Get the visual selection row range (start..=end) if visual mode is active
+    pub fn visual_selection_range(&self) -> Option<(usize, usize)> {
+        let anchor = match self.visual_select? {
+            VisualSelect::Cell { anchor } => anchor,
+            VisualSelect::Line { anchor } => anchor,
+        };
+        let start = anchor.min(self.result_cursor);
+        let end = anchor.max(self.result_cursor);
+        Some((start, end))
+    }
 }
 
 fn cycle_next(index: &mut usize, len: usize) {
@@ -355,12 +376,16 @@ pub struct Controller {
     pub pending_escape: bool,
     pub pending_ctrl_w: bool,
     pub spinner_state: usize,
+    pub clipboard: Option<arboard::Clipboard>,
 }
 
 impl Controller {
     pub fn with_connections(connections: Vec<DatabaseConn>) -> Self {
         let runtime = Runtime::new().expect("Failed to create tokio runtime");
         let template_store = TemplateStore::load();
+        let clipboard = arboard::Clipboard::new()
+            .map_err(|e| crate::debug_log!("Failed to init clipboard: {}", e))
+            .ok();
 
         Self {
             mode: Mode::Normal,
@@ -377,6 +402,7 @@ impl Controller {
             needs_redraw: false,
             pending_escape: false,
             pending_ctrl_w: false,
+            clipboard,
         }
     }
 
@@ -495,6 +521,7 @@ impl Controller {
                         tab.result_scroll = 0;
                         tab.result_cursor = 0;
                         tab.result_h_scroll = 0;
+                        tab.visual_select = None;
                         let timestamp = Local::now().format("%H:%M:%S");
 
                         match result {

@@ -301,8 +301,7 @@ impl App {
         let has_groups = tab.connection_groups.len() > 1;
         let extra_height = if has_groups { 2 } else { 0 }; // 1 for tabs, 1 for spacing
         // Use total connections count for consistent sizing
-        let list_height =
-            (tab.connections.len() as u16 + 4 + extra_height).min(padded_area.height);
+        let list_height = (tab.connections.len() as u16 + 4 + extra_height).min(padded_area.height);
 
         let list_x = padded_area.x + (padded_area.width.saturating_sub(list_width)) / 2;
         let list_y = padded_area.y + (padded_area.height.saturating_sub(list_height)) / 2;
@@ -545,7 +544,12 @@ impl App {
         let is_focused = tab.focus == Focus::Output;
         let (_, bg_color) = focus_colors(is_focused);
 
-        let block = panel_block("Results", is_focused, Borders::NONE);
+        let title = match tab.visual_select {
+            Some(crate::controller::VisualSelect::Cell { .. }) => "Results ── VISUAL",
+            Some(crate::controller::VisualSelect::Line { .. }) => "Results ── VISUAL LINE",
+            None => "Results",
+        };
+        let block = panel_block(title, is_focused, Borders::NONE);
 
         let inner_area = block.inner(area);
         frame.render_widget(block, area);
@@ -640,6 +644,15 @@ impl App {
                     let visible_height = inner_area.height.saturating_sub(1) as usize; // -1 for header
                     let scroll = tab.result_scroll;
                     let cursor = tab.result_cursor;
+                    let visual_range = tab.visual_selection_range();
+                    let is_cell_visual = matches!(
+                        tab.visual_select,
+                        Some(crate::controller::VisualSelect::Cell { .. })
+                    );
+                    let is_line_visual = matches!(
+                        tab.visual_select,
+                        Some(crate::controller::VisualSelect::Line { .. })
+                    );
 
                     let visible_rows = rows
                         .iter()
@@ -648,6 +661,8 @@ impl App {
                         .take(visible_height)
                         .map(|(idx, row)| {
                             let is_cursor_row = idx == cursor && is_focused;
+                            let in_visual_range =
+                                visual_range.is_some_and(|(s, e)| idx >= s && idx <= e);
                             let cells = visible_col_indices
                                 .iter()
                                 .zip(visible_col_widths.iter())
@@ -655,7 +670,16 @@ impl App {
                                     let cell_text =
                                         row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
                                     let text = truncate_str(cell_text, w.saturating_sub(1));
-                                    let style = if col_idx == selected_col && is_cursor_row {
+                                    let style = if is_line_visual && in_visual_range {
+                                        // Line visual: highlight entire row
+                                        Style::default().fg(TEXT).bg(BLUE)
+                                    } else if is_cell_visual
+                                        && in_visual_range
+                                        && col_idx == selected_col
+                                    {
+                                        // Cell visual: highlight only the selected column
+                                        Style::default().fg(TEXT).bg(BLUE)
+                                    } else if col_idx == selected_col && is_cursor_row {
                                         // Selected cell (current row + current column)
                                         Style::default().fg(TEXT).bg(BLUE)
                                     } else if col_idx == selected_col && is_focused {
@@ -667,7 +691,9 @@ impl App {
                                     Cell::from(text).style(style)
                                 });
                             let row = Row::new(cells).height(1);
-                            if is_cursor_row {
+                            if is_line_visual && in_visual_range {
+                                row.style(Style::default().bg(BLUE))
+                            } else if is_cursor_row {
                                 row.style(Style::default().bg(HIGHLIGHT))
                             } else {
                                 row.style(Style::default().bg(bg_color))

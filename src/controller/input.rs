@@ -372,6 +372,21 @@ impl Controller {
             KeyCode::Char('G') => {
                 self.scroll_to_end();
             }
+            KeyCode::Char('v') => {
+                self.toggle_visual_select_cell();
+            }
+            KeyCode::Char('V') => {
+                self.toggle_visual_select_line();
+            }
+            KeyCode::Char('y') => {
+                self.yank_selected_rows();
+            }
+            KeyCode::Esc => {
+                let tab = self.current_tab_mut();
+                if tab.visual_select.is_some() {
+                    tab.visual_select = None;
+                }
+            }
             KeyCode::Enter => {
                 self.open_record_detail();
             }

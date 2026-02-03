@@ -206,4 +206,99 @@ impl Controller {
             tab.result_h_scroll = col_end.saturating_sub(visible_width);
         }
     }
+
+    /// Toggle cell visual selection (v) — selects cells in the current column
+    pub(super) fn toggle_visual_select_cell(&mut self) {
+        let tab = self.current_tab_mut();
+        if matches!(tab.visual_select, Some(super::VisualSelect::Cell { .. })) {
+            tab.visual_select = None;
+        } else {
+            tab.visual_select = Some(super::VisualSelect::Cell {
+                anchor: tab.result_cursor,
+            });
+        }
+    }
+
+    /// Toggle line visual selection (V) — selects entire rows
+    pub(super) fn toggle_visual_select_line(&mut self) {
+        let tab = self.current_tab_mut();
+        if matches!(tab.visual_select, Some(super::VisualSelect::Line { .. })) {
+            tab.visual_select = None;
+        } else {
+            tab.visual_select = Some(super::VisualSelect::Line {
+                anchor: tab.result_cursor,
+            });
+        }
+    }
+
+    /// Yank (copy) selected cells/rows to the system clipboard
+    pub(super) fn yank_selected_rows(&mut self) {
+        let tab = self.current_tab();
+        let visual = tab.visual_select;
+        let cursor = tab.result_cursor;
+        let selected_col = tab.result_selected_col;
+
+        let Some(QueryResult::Select { columns, rows }) = &tab.query_result else {
+            return;
+        };
+
+        match visual {
+            Some(super::VisualSelect::Cell { .. }) => {
+                // Cell mode: copy values from the selected column only
+                let Some((sel_start, sel_end)) = tab.visual_selection_range() else {
+                    return;
+                };
+                let col_name = columns.get(selected_col).cloned().unwrap_or_default();
+                let mut lines = vec![col_name];
+                for row in rows.iter().skip(sel_start).take(sel_end - sel_start + 1) {
+                    let val = row.get(selected_col).cloned().unwrap_or_default();
+                    lines.push(val);
+                }
+                let text = lines.join("\n");
+                let count = sel_end - sel_start + 1;
+                self.copy_to_clipboard(&text, count, "cell(s)");
+                self.current_tab_mut().visual_select = None;
+            }
+            Some(super::VisualSelect::Line { .. }) => {
+                // Line mode: copy entire rows as TSV
+                let Some((sel_start, sel_end)) = tab.visual_selection_range() else {
+                    return;
+                };
+                let header = columns.join("\t");
+                let mut lines = vec![header];
+                for row in rows.iter().skip(sel_start).take(sel_end - sel_start + 1) {
+                    lines.push(row.join("\t"));
+                }
+                let text = lines.join("\n");
+                let count = sel_end - sel_start + 1;
+                self.copy_to_clipboard(&text, count, "row(s)");
+                self.current_tab_mut().visual_select = None;
+            }
+            None => {
+                // No visual mode — yank the single cell at cursor
+                if let Some(row) = rows.get(cursor) {
+                    let val = row.get(selected_col).cloned().unwrap_or_default();
+                    self.copy_to_clipboard(&val, 1, "cell(s)");
+                }
+            }
+        }
+    }
+
+    /// Copy text to the system clipboard and update status message
+    fn copy_to_clipboard(&mut self, text: &str, count: usize, unit: &str) {
+        match &mut self.clipboard {
+            Some(cb) => match cb.set_text(text) {
+                Ok(()) => {
+                    self.current_tab_mut().status_message =
+                        Some(format!("Copied {} {}", count, unit));
+                }
+                Err(e) => {
+                    self.current_tab_mut().status_message = Some(format!("Clipboard error: {}", e));
+                }
+            },
+            None => {
+                self.current_tab_mut().status_message = Some("Clipboard not available".to_string());
+            }
+        }
+    }
 }

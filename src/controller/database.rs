@@ -212,7 +212,8 @@ impl Controller {
             let _ = tx.send(result);
         });
 
-        self.current_tab_mut().pending_operation = Some(PendingOperation::RefreshTables { receiver: rx });
+        self.current_tab_mut().pending_operation =
+            Some(PendingOperation::RefreshTables { receiver: rx });
     }
 
     pub(super) fn select_table(&mut self) {
