@@ -10,6 +10,7 @@ mod editor;
 mod error;
 mod mysql;
 mod postgres;
+mod sqlite;
 mod templates;
 
 use std::io;

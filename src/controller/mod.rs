@@ -111,6 +111,7 @@ pub enum DatabaseType {
     MySql,
     Cassandra,
     ClickHouse,
+    Sqlite,
 }
 
 impl DatabaseType {
@@ -120,6 +121,7 @@ impl DatabaseType {
             DatabaseType::MySql => "MySQL",
             DatabaseType::Cassandra => "Cassandra",
             DatabaseType::ClickHouse => "ClickHouse",
+            DatabaseType::Sqlite => "SQLite",
         }
     }
 
@@ -129,6 +131,7 @@ impl DatabaseType {
             DatabaseType::MySql => "",
             DatabaseType::Cassandra => "",
             DatabaseType::ClickHouse => "default",
+            DatabaseType::Sqlite => "",
         }
     }
 }
@@ -143,6 +146,7 @@ pub struct DatabaseConn {
     pub password: Option<String>,
     pub password_cmd: Option<String>,
     pub database: Option<String>,
+    pub path: Option<String>,
     pub tls: bool,
     pub readonly: bool,
     pub group: Option<String>,
@@ -189,6 +193,11 @@ impl DatabaseConn {
                 )
                 .await?;
                 Ok(DatabaseClient::ClickHouse(client))
+            }
+            DatabaseType::Sqlite => {
+                let path = self.path.as_deref().unwrap_or(&self.host);
+                let client = crate::sqlite::SqliteClient::connect(path).await?;
+                Ok(DatabaseClient::Sqlite(client))
             }
         }
     }

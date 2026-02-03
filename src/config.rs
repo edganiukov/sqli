@@ -8,6 +8,7 @@ use std::path::PathBuf;
 pub struct ConnectionConfig {
     #[serde(rename = "type")]
     pub db_type: String,
+    #[serde(default)]
     pub host: String,
     #[serde(default)]
     pub port: u16,
@@ -19,6 +20,8 @@ pub struct ConnectionConfig {
     pub password_cmd: Option<String>,
     #[serde(default)]
     pub database: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
     #[serde(default)]
     pub tls: bool,
     #[serde(default)]
@@ -34,6 +37,7 @@ impl ConnectionConfig {
             "mysql" | "mariadb" => DatabaseType::MySql,
             "cassandra" | "scylla" => DatabaseType::Cassandra,
             "clickhouse" | "ch" => DatabaseType::ClickHouse,
+            "sqlite" | "sqlite3" => DatabaseType::Sqlite,
             _ => return None,
         };
 
@@ -46,6 +50,7 @@ impl ConnectionConfig {
             password: self.password.clone(),
             password_cmd: self.password_cmd.clone(),
             database: self.database.clone(),
+            path: self.path.clone(),
             tls: self.tls,
             readonly: self.readonly,
             group: self.group.clone(),
@@ -147,6 +152,7 @@ fn default_connections() -> Vec<DatabaseConn> {
         password: None,
         password_cmd: None,
         database: None,
+        path: None,
         tls: false,
         readonly: false,
         group: None,

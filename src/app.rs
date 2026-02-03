@@ -271,6 +271,11 @@ impl App {
         let items: Vec<ListItem> = filtered
             .iter()
             .map(|conn| {
+                let location = if let Some(ref path) = conn.path {
+                    format!(" {}", path)
+                } else {
+                    format!(" {}:{}", conn.host, conn.port)
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         format!("[{}]", conn.db_type.as_str()),
@@ -281,10 +286,7 @@ impl App {
                         &conn.name,
                         Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        format!(" {}:{}", conn.host, conn.port),
-                        Style::default().fg(TEXT_DIM),
-                    ),
+                    Span::styled(location, Style::default().fg(TEXT_DIM)),
                 ]))
             })
             .collect();

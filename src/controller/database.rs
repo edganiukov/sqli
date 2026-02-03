@@ -49,6 +49,15 @@ impl Controller {
             return;
         }
 
+        // SQLite is a single-file database — connect directly using the file path
+        if matches!(conn.db_type, DatabaseType::Sqlite) {
+            let path = conn.path.as_deref().unwrap_or(&conn.host);
+            let db_name = path.rsplit('/').next().unwrap_or(path).to_string();
+            debug_log!("SQLite file '{}', connecting directly", path);
+            self.connect_to_database(db_name);
+            return;
+        }
+
         // Otherwise, fetch database list for selection
         tab.status_message = Some("Connecting...".to_string());
         tab.loading = true;

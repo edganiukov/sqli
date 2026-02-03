@@ -10,6 +10,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - **MySQL/MariaDB** - native protocol.
 - **Cassandra/ScyllaDB** - CQL protocol.
 - **ClickHouse** - HTTP API.
+- **SQLite** - file-based (bundled).
 
 ## Features
 
@@ -137,14 +138,20 @@ port = 9042
 user = "cassandra"
 password = "cassandra"
 group = "NoSQL"
+
+[my-sqlite]
+type = "sqlite"
+path = "/path/to/database.db"
+group = "Local"
 ```
 
 ### Connection Options
 
 | Option | Description |
 |--------|-------------|
-| `type` | Database type: `postgres`, `mysql`, `cassandra`, `clickhouse` |
+| `type` | Database type: `postgres`, `mysql`, `cassandra`, `clickhouse`, `sqlite` |
 | `host` | Server hostname |
+| `path` | File path (SQLite only) |
 | `port` | Server port (optional, uses default for type) |
 | `user` | Username |
 | `password` | Password (plaintext) |

@@ -39,6 +39,11 @@ user = "default"
 password = "password"
 group = "Analytics"
 
+[sqlite]
+type = "sqlite"
+path = "/path/to/database.db"
+group = "Local"
+
 # Example production connection (different group)
 [prod-postgres]
 type = "postgres"
