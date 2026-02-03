@@ -60,6 +60,10 @@ A terminal-based SQL client. Supports multiple database backends.
 - `gg/G` - go top/bottom
 - `PageUp/Down` - page scroll
 - `Enter` - open record detail popup
+- `v` - cell visual select (current column)
+- `V` - line visual select (entire rows)
+- `y` - copy selection to clipboard (or single cell without visual mode)
+- `Esc` - cancel visual selection
 
 **Record Detail Popup**
 - `j/k` - navigate fields
