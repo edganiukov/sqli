@@ -21,7 +21,10 @@ use clap::Parser;
 use controller::Controller;
 
 use crossterm::ExecutableCommand;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyEventKind,
+};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -59,11 +62,14 @@ fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     io::stdout()
         .execute(EnterAlternateScreen)?
         .execute(EnableMouseCapture)?;
+    // Bracketed paste may not be supported in all environments (e.g. some tmux configs)
+    let _ = io::stdout().execute(EnableBracketedPaste);
     Terminal::new(CrosstermBackend::new(io::stdout()))
 }
 
 fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
+    let _ = io::stdout().execute(DisableBracketedPaste);
     io::stdout()
         .execute(DisableMouseCapture)?
         .execute(LeaveAlternateScreen)?;
@@ -88,16 +94,25 @@ fn run(
         // Poll pending async operations
         app.poll_pending();
 
-        // Use poll with timeout to allow spinner animation
+        // Drain all available events before redrawing
         if event::poll(std::time::Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    app.handle_key(key);
+            loop {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        app.handle_key(key);
+                    }
+                    Event::Mouse(mouse) => {
+                        app.handle_mouse(mouse);
+                    }
+                    Event::Paste(text) => {
+                        app.handle_paste(text);
+                    }
+                    _ => {}
                 }
-                Event::Mouse(mouse) => {
-                    app.handle_mouse(mouse);
+                // Process remaining queued events without blocking
+                if !event::poll(std::time::Duration::ZERO)? {
+                    break;
                 }
-                _ => {}
             }
         }
 

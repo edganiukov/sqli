@@ -143,6 +143,10 @@ impl App {
         self.controller.handle_mouse(mouse_event);
     }
 
+    pub fn handle_paste(&mut self, text: String) {
+        self.controller.handle_paste(text);
+    }
+
     pub fn tick_spinner(&mut self) {
         self.controller.tick_spinner();
     }

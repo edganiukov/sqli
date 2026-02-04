@@ -403,6 +403,13 @@ impl Controller {
         }
     }
 
+    pub fn handle_paste(&mut self, text: String) {
+        let view_state = self.current_tab().view_state;
+        if view_state == ViewState::DatabaseView && self.current_tab().focus == Focus::Query {
+            self.query_textarea.insert_str(&text);
+        }
+    }
+
     pub fn handle_command_mode(&mut self, key_code: KeyCode) {
         match key_code {
             KeyCode::Esc => {
