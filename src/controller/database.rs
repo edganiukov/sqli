@@ -83,6 +83,49 @@ impl Controller {
         });
     }
 
+    /// Open database selection popup from DatabaseView (switch databases)
+    pub(super) fn open_database_select(&mut self) {
+        let tab = self.current_tab();
+        if tab.view_state != super::ViewState::DatabaseView {
+            self.current_tab_mut().status_message = Some("Not connected to a database".to_string());
+            return;
+        }
+
+        // SQLite is single-file, no database switching
+        let conn = match tab.connections.get(tab.selected_index) {
+            Some(c) => c.clone(),
+            None => return,
+        };
+        if matches!(conn.db_type, DatabaseType::Sqlite) {
+            self.current_tab_mut().status_message =
+                Some("SQLite does not support switching databases".to_string());
+            return;
+        }
+
+        let tab = self.current_tab_mut();
+        tab.loading = true;
+        tab.status_message = Some("Fetching databases...".to_string());
+
+        let include_system = tab.show_system_databases;
+        let conn_name = conn.name.clone();
+
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let db_name = conn.db_type.default_database().to_string();
+            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
+                let client = conn.create_client(&db_name).await?;
+                client.list_databases(include_system).await
+            })
+            .await
+            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
+            let _ = tx.send(result);
+        });
+        self.current_tab_mut().pending_operation = Some(PendingOperation::ListDatabases {
+            receiver: rx,
+            conn_name,
+        });
+    }
+
     /// Refresh the database list (used when toggling system databases)
     pub(super) fn refresh_database_list(&mut self) {
         let tab = self.current_tab_mut();
@@ -126,7 +169,7 @@ impl Controller {
     }
 
     /// Connect to a specific database and load tables
-    fn connect_to_database(&mut self, db_name: String) {
+    pub(super) fn connect_to_database(&mut self, db_name: String) {
         let tab = self.current_tab_mut();
         let conn = match tab.connections.get(tab.selected_index) {
             Some(c) => c.clone(),

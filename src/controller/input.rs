@@ -89,11 +89,17 @@ impl Controller {
                 self.current_tab_mut().database_prev();
             }
             KeyCode::Esc => {
-                // Go back to connection list
                 let tab = self.current_tab_mut();
-                tab.view_state = ViewState::ConnectionList;
-                tab.name = "New".to_string();
-                tab.databases.clear();
+                if tab.db_client.is_some() {
+                    // Already connected — go back to database view
+                    tab.view_state = ViewState::DatabaseView;
+                    tab.databases.clear();
+                } else {
+                    // Not connected — go back to connection list
+                    tab.view_state = ViewState::ConnectionList;
+                    tab.name = "New".to_string();
+                    tab.databases.clear();
+                }
             }
             KeyCode::Enter => {
                 self.connect_to_selected_database_from_list();
@@ -425,6 +431,7 @@ impl Controller {
             "next" => self.next_tab(),
             "prev" => self.previous_tab(),
             "new" => self.new_tab(),
+            "db" => self.open_database_select(),
             "sysdb" => self.toggle_system_databases(),
             "help" | "h" => self.show_help(),
             cmd => {
@@ -434,7 +441,7 @@ impl Controller {
     }
 
     fn show_help(&mut self) {
-        let help = ":q quit | F5/Ctrl+R exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor | Ctrl+w hjkl nav";
+        let help = ":q quit | :db switch database | F5/Ctrl+R exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor";
         self.current_tab_mut().status_message = Some(help.to_string());
     }
 

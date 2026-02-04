@@ -81,6 +81,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - `:qa` or `q!` - quit all tabs
 - `:new` - new tab
 - `:next/:prev` - switch tabs
+- `:db` - switch database (within current connection)
 - `:sysdb` - toggle system DBs
 
 ## Configuration

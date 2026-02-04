@@ -456,8 +456,14 @@ impl Controller {
                             Ok(databases) => {
                                 crate::debug_log!("Found {} database(s)", databases.len());
                                 tab.name = conn_name;
+                                // Pre-select current database if switching
+                                let selected = tab
+                                    .current_database
+                                    .as_ref()
+                                    .and_then(|cur| databases.iter().position(|d| d == cur))
+                                    .unwrap_or(0);
                                 tab.databases = databases;
-                                tab.database_selected = 0;
+                                tab.database_selected = selected;
                                 tab.status_message = None;
                                 tab.view_state = ViewState::DatabaseList;
                             }
