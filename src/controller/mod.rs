@@ -386,6 +386,7 @@ pub struct Controller {
     pub pending_ctrl_w: bool,
     pub spinner_state: usize,
     pub clipboard: Option<arboard::Clipboard>,
+    pub last_click: Option<(std::time::Instant, u16, u16)>,
 }
 
 impl Controller {
@@ -412,6 +413,7 @@ impl Controller {
             pending_escape: false,
             pending_ctrl_w: false,
             clipboard,
+            last_click: None,
         }
     }
 

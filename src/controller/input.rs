@@ -531,6 +531,14 @@ impl Controller {
             return;
         }
 
+        // Detect double-click (within 400ms and same position)
+        const DOUBLE_CLICK_MS: u128 = 400;
+        let is_double_click = self
+            .last_click
+            .map(|(t, lx, ly)| t.elapsed().as_millis() < DOUBLE_CLICK_MS && lx == x && ly == y)
+            .unwrap_or(false);
+        self.last_click = Some((std::time::Instant::now(), x, y));
+
         // Handle tab bar clicks (row 0)
         if y == 0 {
             self.handle_mouse_tab_bar(x);
@@ -546,13 +554,13 @@ impl Controller {
 
         match view_state {
             ViewState::ConnectionList => {
-                self.handle_mouse_connection_list(x, y, term_size);
+                self.handle_mouse_connection_list(x, y, term_size, is_double_click);
             }
             ViewState::DatabaseList => {
-                self.handle_mouse_database_list(x, y, term_size);
+                self.handle_mouse_database_list(x, y, term_size, is_double_click);
             }
             ViewState::DatabaseView => {
-                self.handle_mouse_database_view(x, y, term_size);
+                self.handle_mouse_database_view(x, y, term_size, is_double_click);
             }
         }
     }
@@ -636,7 +644,13 @@ impl Controller {
         }
     }
 
-    fn handle_mouse_connection_list(&mut self, _x: u16, y: u16, term_size: (u16, u16)) {
+    fn handle_mouse_connection_list(
+        &mut self,
+        _x: u16,
+        y: u16,
+        term_size: (u16, u16),
+        is_double_click: bool,
+    ) {
         let tab = self.current_tab();
         let filtered = tab.filtered_connections();
         let filtered_count = filtered.len();
@@ -659,13 +673,20 @@ impl Controller {
             let clicked_index = (y - list_content_y) as usize;
             if clicked_index < filtered_count {
                 self.current_tab_mut().selected_index = clicked_index;
-                // Double-click effect: connect immediately
-                self.initiate_connection();
+                if is_double_click {
+                    self.initiate_connection();
+                }
             }
         }
     }
 
-    fn handle_mouse_database_list(&mut self, _x: u16, y: u16, term_size: (u16, u16)) {
+    fn handle_mouse_database_list(
+        &mut self,
+        _x: u16,
+        y: u16,
+        term_size: (u16, u16),
+        is_double_click: bool,
+    ) {
         let tab = self.current_tab();
         let db_count = tab.databases.len();
         if db_count == 0 {
@@ -681,20 +702,26 @@ impl Controller {
             let clicked_index = (y - list_y - 2) as usize;
             if clicked_index < db_count {
                 self.current_tab_mut().database_selected = clicked_index;
-                // Connect to selected database
-                self.connect_to_selected_database_from_list();
+                if is_double_click {
+                    self.connect_to_selected_database_from_list();
+                }
             }
         }
     }
 
-    fn handle_mouse_database_view(&mut self, x: u16, y: u16, term_size: (u16, u16)) {
+    fn handle_mouse_database_view(
+        &mut self,
+        x: u16,
+        y: u16,
+        term_size: (u16, u16),
+        is_double_click: bool,
+    ) {
         const SIDEBAR_WIDTH: u16 = 40;
         let main_area_height = term_size.1 - 3; // minus tab bar, status, command
         let query_height = main_area_height * 35 / 100;
 
         if x < SIDEBAR_WIDTH {
             // Clicked on sidebar
-            let was_focused = self.current_tab().focus == Focus::Sidebar;
             self.current_tab_mut().focus = Focus::Sidebar;
 
             // Calculate which table was clicked
@@ -704,8 +731,7 @@ impl Controller {
 
             if clicked_row < table_count {
                 self.current_tab_mut().sidebar.selected = clicked_row;
-                // Only select the table if sidebar was already focused
-                if was_focused {
+                if is_double_click {
                     self.select_table();
                 }
             }
@@ -714,7 +740,6 @@ impl Controller {
             self.current_tab_mut().focus = Focus::Query;
         } else {
             // Clicked on output area
-            let was_focused = self.current_tab().focus == Focus::Output;
             self.current_tab_mut().focus = Focus::Output;
 
             // Calculate which row was clicked
@@ -736,9 +761,8 @@ impl Controller {
                 }
             }
 
-            // Only open record detail popup if output was already focused
-            // and the click landed on an actual data row
-            if was_focused && clicked_valid_row {
+            // Open record detail popup on double-click
+            if is_double_click && clicked_valid_row {
                 self.open_record_detail();
             }
         }
