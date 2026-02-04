@@ -193,6 +193,17 @@ impl App {
             tab.status_message.as_deref().unwrap_or("").to_string()
         };
 
+        // Pending key indicator (right-aligned in status bar)
+        let pending_indicator = if self.controller.pending_ctrl_w {
+            " ^W- "
+        } else if self.controller.pending_escape {
+            " Esc- "
+        } else if self.controller.current_tab().pending_g {
+            " g- "
+        } else {
+            ""
+        };
+
         let status_line = if view_state == ViewState::DatabaseView {
             let conn = tab.connections.get(tab.selected_index);
 
@@ -212,19 +223,29 @@ impl App {
             let is_readonly = conn.map(|c| c.readonly).unwrap_or(false);
             let ro_suffix = if is_readonly { " [RO]" } else { "" };
 
+            // Calculate fill width for right-alignment
+            let left = format!(" {}{}{} ", db_name, ro_suffix, table_name);
+            let left_len = left.len() + status_msg.len();
+            let bar_width = chunks[2].width as usize;
+            let fill = bar_width.saturating_sub(left_len + pending_indicator.len());
+
             Paragraph::new(Line::from(vec![
-                Span::styled(
-                    format!(" {}{}{} ", db_name, ro_suffix, table_name),
-                    Style::default().fg(TEXT),
-                ),
+                Span::styled(left, Style::default().fg(TEXT)),
                 Span::styled(status_msg, Style::default().fg(TEXT_DIM)),
+                Span::styled(" ".repeat(fill), Style::default()),
+                Span::styled(pending_indicator, Style::default().fg(ACCENT)),
             ]))
             .style(Style::default().bg(SURFACE_DIM))
         } else {
-            Paragraph::new(Line::from(vec![Span::styled(
-                status_msg,
-                Style::default().fg(TEXT),
-            )]))
+            let left_len = status_msg.len();
+            let bar_width = chunks[2].width as usize;
+            let fill = bar_width.saturating_sub(left_len + pending_indicator.len());
+
+            Paragraph::new(Line::from(vec![
+                Span::styled(&status_msg, Style::default().fg(TEXT)),
+                Span::styled(" ".repeat(fill), Style::default()),
+                Span::styled(pending_indicator, Style::default().fg(ACCENT)),
+            ]))
             .style(Style::default().bg(SURFACE_DIM))
         };
         frame.render_widget(status_line, chunks[2]);
