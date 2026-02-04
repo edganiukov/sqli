@@ -227,23 +227,43 @@ impl Controller {
         // Ctrl shortcuts
         if key_event.modifiers.contains(KeyModifiers::CONTROL) {
             match key_event.code {
-                KeyCode::Char('r') => self.execute_query(),
-                KeyCode::Char('o') => self.open_template_popup(),
-                KeyCode::Char('s') => self.open_save_template_popup(),
-                KeyCode::Char('g') => self.edit_query_in_editor(),
-                KeyCode::Char(' ') => self.open_completion(),
+                KeyCode::Char('r') => {
+                    self.execute_query();
+                    return;
+                }
+                KeyCode::Char('o') => {
+                    self.open_template_popup();
+                    return;
+                }
+                KeyCode::Char('s') => {
+                    self.open_save_template_popup();
+                    return;
+                }
+                KeyCode::Char('g') => {
+                    self.edit_query_in_editor();
+                    return;
+                }
+                KeyCode::Char(' ') => {
+                    self.open_completion();
+                    return;
+                }
                 KeyCode::Char('k') => {
                     self.query_textarea.delete_line_by_end();
+                    return;
                 }
                 KeyCode::Left => {
                     self.query_textarea.move_cursor(CursorMove::WordBack);
+                    return;
                 }
                 KeyCode::Right => {
                     self.query_textarea.move_cursor(CursorMove::WordForward);
+                    return;
                 }
-                _ => {}
+                _ => {
+                    // Pass unhandled Ctrl combos (e.g. Ctrl+J from tmux paste)
+                    // through to the textarea
+                }
             }
-            return;
         }
 
         // Focus navigation
