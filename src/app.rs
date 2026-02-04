@@ -9,6 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
 };
+use tui_textarea::CursorMove;
 
 const PADDING: u16 = 1;
 
@@ -145,6 +146,12 @@ impl App {
 
     pub fn handle_paste(&mut self, text: String) {
         self.controller.handle_paste(text);
+    }
+
+    pub fn handle_resize(&mut self) {
+        // Reset textarea viewport so content is visible from the top after resize
+        self.controller.query_textarea.move_cursor(CursorMove::Top);
+        self.controller.query_textarea.move_cursor(CursorMove::Head);
     }
 
     pub fn tick_spinner(&mut self) {

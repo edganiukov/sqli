@@ -107,6 +107,9 @@ fn run(
                     Event::Paste(text) => {
                         app.handle_paste(text);
                     }
+                    Event::Resize(_, _) => {
+                        app.handle_resize();
+                    }
                     _ => {}
                 }
                 // Process remaining queued events without blocking
