@@ -710,9 +710,12 @@ impl Controller {
 
             // Calculate which row was clicked
             // Output area starts after: tab bar (1) + query area (query_height)
-            // Then inside output: header row (1), then data rows
-            let output_y_start = 1 + query_height;
-            let clicked_row = (y - output_y_start).saturating_sub(2) as usize; // -1 for title, -1 for header
+            // Then inside output: title (1), header row (1), then data rows
+            let data_y_start = 1 + query_height + 2; // +1 title, +1 header
+            if y < data_y_start {
+                return;
+            }
+            let clicked_row = (y - data_y_start) as usize;
 
             let mut clicked_valid_row = false;
             let tab = self.current_tab_mut();
