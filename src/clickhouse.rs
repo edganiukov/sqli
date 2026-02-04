@@ -186,8 +186,7 @@ impl ClickHouseClient {
             serde_json::Value::Bool(b) => b.to_string(),
             serde_json::Value::Number(n) => n.to_string(),
             serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
-            serde_json::Value::Object(obj) => format!("{{{} fields}}", obj.len()),
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => value.to_string(),
         }
     }
 }
