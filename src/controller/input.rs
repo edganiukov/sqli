@@ -432,7 +432,7 @@ impl Controller {
             "prev" => self.previous_tab(),
             "new" => self.new_tab(),
             "db" => self.open_database_select(),
-            "sysdb" => self.toggle_system_databases(),
+            "system" => self.toggle_system_databases(),
             "help" | "h" => self.show_help(),
             cmd => {
                 self.current_tab_mut().status_message = Some(format!("Unknown command: {}", cmd));

@@ -82,7 +82,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - `:new` - new tab
 - `:next/:prev` - switch tabs
 - `:db` - switch database (within current connection)
-- `:sysdb` - toggle system DBs
+- `:system` - toggle system DBs
 
 ## Configuration
 
