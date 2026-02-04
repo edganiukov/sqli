@@ -41,7 +41,9 @@ A terminal-based SQL client. Supports multiple database backends.
 - `Ctrl+w h/j/k/l` - directional focus
 
 **Query Editor**
-- `F5` / `Ctrl+R` - execute query
+- `F5` / `Ctrl+E` - execute query
+- `Ctrl+Z` - undo
+- `Ctrl+R` - redo
 - `Ctrl+Space` - autocompletion (keywords, tables, columns)
 - `Ctrl+O` - open templates
 - `Ctrl+S` - save template

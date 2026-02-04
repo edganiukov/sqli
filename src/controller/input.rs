@@ -227,8 +227,12 @@ impl Controller {
         // Ctrl shortcuts
         if key_event.modifiers.contains(KeyModifiers::CONTROL) {
             match key_event.code {
-                KeyCode::Char('r') => {
+                KeyCode::Char('e') => {
                     self.execute_query();
+                    return;
+                }
+                KeyCode::Char('r') => {
+                    self.query_textarea.redo();
                     return;
                 }
                 KeyCode::Char('o') => {
@@ -251,6 +255,11 @@ impl Controller {
                     self.query_textarea.delete_line_by_end();
                     return;
                 }
+                KeyCode::Char('z') => {
+                    self.query_textarea.undo();
+                    return;
+                }
+
                 KeyCode::Left => {
                     self.query_textarea.move_cursor(CursorMove::WordBack);
                     return;
@@ -468,7 +477,7 @@ impl Controller {
     }
 
     fn show_help(&mut self) {
-        let help = ":q quit | :db switch database | F5/Ctrl+R exec | Ctrl+O templates | Ctrl+S save | Ctrl+G editor";
+        let help = ":q quit | :db switch database | F5/Ctrl+E exec | Ctrl+Z undo | Ctrl+R redo | Ctrl+O templates";
         self.current_tab_mut().status_message = Some(help.to_string());
     }
 
