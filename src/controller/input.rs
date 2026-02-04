@@ -259,6 +259,11 @@ impl Controller {
                     self.query_textarea.undo();
                     return;
                 }
+                KeyCode::Char(';') => {
+                    self.mode = Mode::Command;
+                    self.command_buffer.clear();
+                    return;
+                }
 
                 KeyCode::Left => {
                     self.query_textarea.move_cursor(CursorMove::WordBack);
