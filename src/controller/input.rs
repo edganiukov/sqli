@@ -356,8 +356,13 @@ impl Controller {
             return;
         }
 
-        // Use a reasonable default visible height (will be adjusted by scroll logic)
-        const VISIBLE_HEIGHT: usize = 20;
+        // Calculate actual visible height based on terminal size
+        let term_size = crossterm::terminal::size().unwrap_or((80, 24));
+        let main_area_height = term_size.1.saturating_sub(3); // minus tab bar, status, command
+        let query_height = main_area_height * 35 / 100;
+        let output_height = main_area_height - query_height;
+        // Subtract 2 for title and header row
+        let visible_height = output_height.saturating_sub(2) as usize;
 
         let tab = self.current_tab_mut();
 
@@ -382,10 +387,10 @@ impl Controller {
                 self.current_tab_mut().focus = Focus::Query;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.move_cursor(1, VISIBLE_HEIGHT);
+                self.move_cursor(1, visible_height);
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.move_cursor(-1, VISIBLE_HEIGHT);
+                self.move_cursor(-1, visible_height);
             }
             KeyCode::Char('h') | KeyCode::Left => {
                 self.move_column(-1);
@@ -394,10 +399,10 @@ impl Controller {
                 self.move_column(1);
             }
             KeyCode::PageDown => {
-                self.move_cursor(10, VISIBLE_HEIGHT);
+                self.move_cursor(10, visible_height);
             }
             KeyCode::PageUp => {
-                self.move_cursor(-10, VISIBLE_HEIGHT);
+                self.move_cursor(-10, visible_height);
             }
             KeyCode::Char('^') => {
                 self.current_tab_mut().result_selected_col = 0;
