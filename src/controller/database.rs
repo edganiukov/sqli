@@ -32,7 +32,7 @@ impl Controller {
 
         // Store the actual index for database operations after connection
         let tab = self.current_tab_mut();
-        tab.selected_index = actual_index;
+        tab.connected_index = actual_index;
 
         debug_log!(
             "Initiating connection to {} ({}://{}:{})",
@@ -92,7 +92,7 @@ impl Controller {
         }
 
         // SQLite is single-file, no database switching
-        let conn = match tab.connections.get(tab.selected_index) {
+        let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
             None => return,
         };
@@ -129,7 +129,7 @@ impl Controller {
     /// Refresh the database list (used when toggling system databases)
     pub(super) fn refresh_database_list(&mut self) {
         let tab = self.current_tab_mut();
-        let conn = match tab.connections.get(tab.selected_index) {
+        let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
             None => return,
         };
@@ -171,7 +171,7 @@ impl Controller {
     /// Connect to a specific database and load tables
     pub(super) fn connect_to_database(&mut self, db_name: String) {
         let tab = self.current_tab_mut();
-        let conn = match tab.connections.get(tab.selected_index) {
+        let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
             None => return,
         };
@@ -237,7 +237,7 @@ impl Controller {
             None => return,
         };
 
-        let conn = match tab.connections.get(tab.selected_index) {
+        let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
             None => return,
         };
@@ -311,7 +311,7 @@ impl Controller {
         }
 
         let tab = self.current_tab();
-        let conn = match tab.connections.get(tab.selected_index) {
+        let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
             None => return,
         };

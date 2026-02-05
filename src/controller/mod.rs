@@ -220,7 +220,8 @@ pub struct SidebarState {
 pub struct Tab {
     pub name: String,
     pub connections: Vec<DatabaseConn>,
-    pub selected_index: usize,
+    pub selected_index: usize, // index in filtered connection list (for UI)
+    pub connected_index: usize, // index in full connections list (after connection)
     pub view_state: ViewState,
     pub focus: Focus,
     pub db_client: Option<Arc<DatabaseClient>>,
@@ -264,6 +265,7 @@ impl Tab {
             name: "New".to_string(),
             connections,
             selected_index: 0,
+            connected_index: 0,
             view_state: ViewState::ConnectionList,
             focus: Focus::Sidebar,
             db_client: None,
