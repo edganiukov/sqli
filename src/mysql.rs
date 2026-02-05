@@ -30,7 +30,7 @@ impl MySqlClient {
 
         // Test connection
         let mut conn = pool.get_conn().await?;
-        conn.query_drop("select 1").await?;
+        conn.query_drop("SELECT 1").await?;
 
         Ok(Self { pool })
     }
@@ -40,7 +40,7 @@ impl MySqlClient {
             &["information_schema", "mysql", "performance_schema", "sys"];
 
         let mut conn = self.pool.get_conn().await?;
-        let databases: Vec<String> = conn.query("show databases").await?;
+        let databases: Vec<String> = conn.query("SHOW DATABASES").await?;
 
         let filtered: Vec<String> = databases
             .into_iter()
@@ -53,7 +53,7 @@ impl MySqlClient {
     pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!(
-            "select table_name from information_schema.tables where table_schema = '{}' order by table_name",
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = '{}' ORDER BY table_name",
             database.replace('\'', "''")
         );
         let tables: Vec<String> = conn.query(query).await?;
@@ -104,11 +104,11 @@ impl MySqlClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
-        format!("select * from {} limit {}", table, limit)
+        format!("SELECT * FROM {} LIMIT {}", table, limit)
     }
 
     pub fn describe_table_query(&self, table: &str, _database: Option<&str>) -> String {
-        format!("describe {}", table)
+        format!("DESCRIBE {}", table)
     }
 
     pub async fn list_columns(&self, table: &str) -> Result<Vec<String>> {

@@ -201,12 +201,12 @@ mod tests {
     #[test]
     fn test_parse_templates() {
         let content = r#"--- Count Rows [global]
-select count(*) from <table>
+SELECT count(*) FROM <table>
 
 --- Active Users [my-db]
-select * from users
-where active = true
-limit <limit>
+SELECT * FROM users
+WHERE active = true
+LIMIT <limit>
 "#;
 
         let templates = TemplateStore::parse(content);
@@ -214,19 +214,19 @@ limit <limit>
 
         assert_eq!(templates[0].name, "Count Rows");
         assert_eq!(templates[0].scope, TemplateScope::Global);
-        assert_eq!(templates[0].query, "select count(*) from <table>");
+        assert_eq!(templates[0].query, "SELECT count(*) FROM <table>");
 
         assert_eq!(templates[1].name, "Active Users");
         assert_eq!(
             templates[1].scope,
             TemplateScope::Connections(vec!["my-db".into()])
         );
-        assert!(templates[1].query.contains("where active = true"));
+        assert!(templates[1].query.contains("WHERE active = true"));
     }
 
     #[test]
     fn test_parse_multi_connection() {
-        let content = "--- Shared Query [db1,db2,db3]\nselect 1\n";
+        let content = "--- Shared Query [db1,db2,db3]\nSELECT 1\n";
         let templates = TemplateStore::parse(content);
         assert_eq!(templates.len(), 1);
         assert_eq!(
@@ -245,17 +245,17 @@ limit <limit>
         let templates = vec![
             Template {
                 name: "Test".to_string(),
-                query: "select 1".to_string(),
+                query: "SELECT 1".to_string(),
                 scope: TemplateScope::Global,
             },
             Template {
                 name: "Local".to_string(),
-                query: "select 2".to_string(),
+                query: "SELECT 2".to_string(),
                 scope: TemplateScope::Connections(vec!["db".into()]),
             },
             Template {
                 name: "Multi".to_string(),
-                query: "select 3".to_string(),
+                query: "SELECT 3".to_string(),
                 scope: TemplateScope::Connections(vec!["a".into(), "b".into()]),
             },
         ];
@@ -268,15 +268,15 @@ limit <limit>
 
     #[test]
     fn test_find_placeholder() {
-        let query = "select * from <table> where id = <id>";
+        let query = "SELECT * FROM <table> WHERE id = <id>";
         let result = find_placeholder(query);
         assert_eq!(result, Some((0, 14, 7))); // <table> starts at col 14, length 7
 
-        let multiline = "select *\nfrom <table>";
+        let multiline = "SELECT *\nFROM <table>";
         let result = find_placeholder(multiline);
         assert_eq!(result, Some((1, 5, 7))); // <table> on line 1
 
-        let no_placeholder = "select * from users";
+        let no_placeholder = "SELECT * FROM users";
         assert_eq!(find_placeholder(no_placeholder), None);
     }
 

@@ -44,7 +44,7 @@ impl ClickHouseClient {
         };
 
         // Test connection
-        ch_client.execute_raw("select 1").await?;
+        ch_client.execute_raw("SELECT 1").await?;
 
         Ok(ch_client)
     }
@@ -76,7 +76,7 @@ impl ClickHouseClient {
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         const SYSTEM_DATABASES: &[&str] = &["system", "INFORMATION_SCHEMA", "information_schema"];
 
-        let query = "select name from system.databases order by name format JSONEachRow";
+        let query = "SELECT name FROM system.databases ORDER BY name FORMAT JSONEachRow";
         let response = self.execute_raw(query).await?;
 
         let databases: Vec<String> = response
@@ -95,7 +95,7 @@ impl ClickHouseClient {
 
     pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         let query = format!(
-            "select name from system.tables where database = '{}' order by name format JSONEachRow",
+            "SELECT name FROM system.tables WHERE database = '{}' ORDER BY name FORMAT JSONEachRow",
             database.replace('\'', "''")
         );
         let response = self.execute_raw(&query).await?;
@@ -152,13 +152,13 @@ impl ClickHouseClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
-        format!("select * from {} limit {}", table, limit)
+        format!("SELECT * FROM {} LIMIT {}", table, limit)
     }
 
     pub fn describe_table_query(&self, table: &str, database: Option<&str>) -> String {
         match database {
-            Some(db) => format!("describe table {}.{}", db, table),
-            None => format!("describe table {}", table),
+            Some(db) => format!("DESCRIBE TABLE {}.{}", db, table),
+            None => format!("DESCRIBE TABLE {}", table),
         }
     }
 

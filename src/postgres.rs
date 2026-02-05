@@ -45,7 +45,7 @@ impl PostgresClient {
 
         let rows = self
             .client
-            .query("select datname from pg_database order by datname", &[])
+            .query("SELECT datname FROM pg_database ORDER BY datname", &[])
             .await?;
 
         let databases: Vec<String> = rows
@@ -62,7 +62,7 @@ impl PostgresClient {
         let rows = self
             .client
             .query(
-                "select tablename from pg_tables where schemaname = $1 order by tablename",
+                "SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename",
                 &[&schema],
             )
             .await?;
@@ -112,15 +112,15 @@ impl PostgresClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, _schema: Option<&str>) -> String {
-        format!("select * from \"{}\" limit {};", table, limit)
+        format!("SELECT * FROM \"{}\" LIMIT {}", table, limit)
     }
 
     pub fn describe_table_query(&self, table: &str, _schema: Option<&str>) -> String {
         format!(
-            "select column_name, data_type, is_nullable, column_default \n\
-             from information_schema.columns \n\
-             where table_name = '{}' \n\
-             order by ordinal_position;",
+            "SELECT column_name, data_type, is_nullable, column_default \n\
+             FROM information_schema.columns \n\
+             WHERE table_name = '{}' \n\
+             ORDER BY ordinal_position",
             table
         )
     }
