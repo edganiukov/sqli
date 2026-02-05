@@ -399,7 +399,12 @@ impl App {
             ])));
         }
 
-        let block = panel_block("Explorer", is_focused, Borders::RIGHT);
+        let title = if table_count > 0 {
+            format!("Explorer ({})", table_count)
+        } else {
+            "Explorer".to_string()
+        };
+        let block = panel_block(&title, is_focused, Borders::RIGHT);
 
         let list = List::new(items)
             .block(block)
@@ -454,12 +459,17 @@ impl App {
         let is_focused = tab.focus == Focus::Output;
         let (_, bg_color) = focus_colors(is_focused);
 
-        let title = match tab.visual_select {
-            Some(crate::controller::VisualSelect::Cell { .. }) => "Results ── VISUAL",
-            Some(crate::controller::VisualSelect::Line { .. }) => "Results ── VISUAL LINE",
-            None => "Results",
+        let row_count = match &tab.query_result {
+            Some(QueryResult::Select { rows, .. }) => Some(rows.len()),
+            _ => None,
         };
-        let block = panel_block(title, is_focused, Borders::NONE);
+        let title = match (tab.visual_select, row_count) {
+            (Some(crate::controller::VisualSelect::Cell { .. }), _) => "Results ── VISUAL".to_string(),
+            (Some(crate::controller::VisualSelect::Line { .. }), _) => "Results ── VISUAL LINE".to_string(),
+            (None, Some(count)) => format!("Results ({} rows)", count),
+            (None, None) => "Results".to_string(),
+        };
+        let block = panel_block(&title, is_focused, Borders::NONE);
 
         let inner_area = block.inner(area);
         frame.render_widget(block, area);
