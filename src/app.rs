@@ -14,15 +14,15 @@ use tui_textarea::CursorMove;
 const PADDING: u16 = 1;
 
 // Color scheme
-const ACCENT: Color = Color::Rgb(180, 140, 100); // Warm tan
-const BLUE: Color = Color::Rgb(70, 115, 150); // Dim blue
-const SUCCESS: Color = Color::Rgb(130, 160, 110); // Muted green
-const WARNING: Color = Color::Rgb(190, 160, 100); // Muted gold
-const SURFACE: Color = Color::Rgb(18, 18, 22); // Dark background (focused)
-const SURFACE_DIM: Color = Color::Rgb(38, 38, 44); // Lighter (unfocused)
-const TEXT: Color = Color::Rgb(220, 220, 225); // Crisp white text
-const TEXT_DIM: Color = Color::Rgb(120, 120, 125); // Cool dimmed text
-const HIGHLIGHT: Color = Color::Rgb(50, 50, 60); // Cool selection
+const ACCENT: Color = Color::Rgb(230, 150, 60); // Orange accent (Pi style)
+const BLUE: Color = Color::Rgb(100, 160, 220); // Bright blue
+const SUCCESS: Color = Color::Rgb(80, 200, 120); // Bright green
+const WARNING: Color = Color::Rgb(240, 180, 80); // Warm yellow
+const SURFACE: Color = Color::Rgb(20, 20, 24); // Dark background (focused)
+const SURFACE_DIM: Color = Color::Rgb(40, 40, 48); // Lighter (unfocused)
+const TEXT: Color = Color::Rgb(230, 230, 235); // Bright white text
+const TEXT_DIM: Color = Color::Rgb(130, 130, 140); // Dimmed text
+const HIGHLIGHT: Color = Color::Rgb(60, 60, 75); // Selection highlight
 
 // UI Helper: Create a styled panel block with title
 fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_> {
