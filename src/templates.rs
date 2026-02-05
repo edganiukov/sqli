@@ -15,16 +15,6 @@ impl TemplateScope {
             TemplateScope::Connections(names) => names.iter().any(|n| n == connection_name),
         }
     }
-
-    /// Create a scope for a single connection
-    pub fn connection(name: impl Into<String>) -> Self {
-        TemplateScope::Connections(vec![name.into()])
-    }
-
-    /// Create a scope for multiple connections
-    pub fn connections(names: Vec<String>) -> Self {
-        TemplateScope::Connections(names)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -227,7 +217,10 @@ limit <limit>
         assert_eq!(templates[0].query, "select count(*) from <table>");
 
         assert_eq!(templates[1].name, "Active Users");
-        assert_eq!(templates[1].scope, TemplateScope::connection("my-db"));
+        assert_eq!(
+            templates[1].scope,
+            TemplateScope::Connections(vec!["my-db".into()])
+        );
         assert!(templates[1].query.contains("where active = true"));
     }
 
@@ -238,7 +231,7 @@ limit <limit>
         assert_eq!(templates.len(), 1);
         assert_eq!(
             templates[0].scope,
-            TemplateScope::connections(vec!["db1".into(), "db2".into(), "db3".into()])
+            TemplateScope::Connections(vec!["db1".into(), "db2".into(), "db3".into()])
         );
         // Should match any of the listed connections
         assert!(templates[0].scope.matches("db1"));
@@ -258,12 +251,12 @@ limit <limit>
             Template {
                 name: "Local".to_string(),
                 query: "select 2".to_string(),
-                scope: TemplateScope::connection("db"),
+                scope: TemplateScope::Connections(vec!["db".into()]),
             },
             Template {
                 name: "Multi".to_string(),
                 query: "select 3".to_string(),
-                scope: TemplateScope::connections(vec!["a".into(), "b".into()]),
+                scope: TemplateScope::Connections(vec!["a".into(), "b".into()]),
             },
         ];
 
@@ -290,11 +283,11 @@ limit <limit>
     #[test]
     fn test_scope_matches() {
         assert!(TemplateScope::Global.matches("any-db"));
-        assert!(TemplateScope::connection("my-db").matches("my-db"));
-        assert!(!TemplateScope::connection("my-db").matches("other-db"));
+        assert!(TemplateScope::Connections(vec!["my-db".into()]).matches("my-db"));
+        assert!(!TemplateScope::Connections(vec!["my-db".into()]).matches("other-db"));
         // Multi-connection scope
-        assert!(TemplateScope::connections(vec!["a".into(), "b".into()]).matches("a"));
-        assert!(TemplateScope::connections(vec!["a".into(), "b".into()]).matches("b"));
-        assert!(!TemplateScope::connections(vec!["a".into(), "b".into()]).matches("c"));
+        assert!(TemplateScope::Connections(vec!["a".into(), "b".into()]).matches("a"));
+        assert!(TemplateScope::Connections(vec!["a".into(), "b".into()]).matches("b"));
+        assert!(!TemplateScope::Connections(vec!["a".into(), "b".into()]).matches("c"));
     }
 }
