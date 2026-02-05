@@ -837,7 +837,7 @@ impl App {
             .map(|t| {
                 let scope_str = match &t.scope {
                     TemplateScope::Global => "[global]".to_string(),
-                    TemplateScope::Connection(name) => format!("[{}]", name),
+                    TemplateScope::Connections(names) => format!("[{}]", names.join(",")),
                 };
                 let preview: String = t
                     .query
@@ -916,8 +916,8 @@ impl App {
         );
 
         let scope_text = match scope {
-            TemplateScope::Global => "[x] Global (all connections)",
-            TemplateScope::Connection(conn) => &format!("[ ] Local ({})", conn),
+            TemplateScope::Global => "[x] Global (all connections)".to_string(),
+            TemplateScope::Connections(conns) => format!("[ ] Local ({})", conns.join(",")),
         };
         frame.render_widget(
             Paragraph::new(format!("Tab to toggle: {}", scope_text))

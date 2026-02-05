@@ -44,7 +44,7 @@ impl Controller {
 
         // Default scope based on current connection
         let scope = match self.current_connection_name() {
-            Some(conn) => TemplateScope::Connection(conn.to_string()),
+            Some(conn) => TemplateScope::connection(conn.to_string()),
             None => TemplateScope::Global,
         };
 
@@ -236,10 +236,10 @@ impl Controller {
                 // Toggle between global and connection-specific
                 scope = match scope {
                     TemplateScope::Global => match self.current_connection_name() {
-                        Some(conn) => TemplateScope::Connection(conn.to_string()),
+                        Some(conn) => TemplateScope::connection(conn),
                         None => TemplateScope::Global,
                     },
-                    TemplateScope::Connection(_) => TemplateScope::Global,
+                    TemplateScope::Connections(_) => TemplateScope::Global,
                 };
                 self.popup_state = PopupState::SaveTemplate { name, scope };
             }

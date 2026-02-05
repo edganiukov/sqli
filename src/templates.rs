@@ -5,15 +5,25 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TemplateScope {
     Global,
-    Connection(String),
+    Connections(Vec<String>),
 }
 
 impl TemplateScope {
     pub fn matches(&self, connection_name: &str) -> bool {
         match self {
             TemplateScope::Global => true,
-            TemplateScope::Connection(name) => name == connection_name,
+            TemplateScope::Connections(names) => names.iter().any(|n| n == connection_name),
         }
+    }
+
+    /// Create a scope for a single connection
+    pub fn connection(name: impl Into<String>) -> Self {
+        TemplateScope::Connections(vec![name.into()])
+    }
+
+    /// Create a scope for multiple connections
+    pub fn connections(names: Vec<String>) -> Self {
+        TemplateScope::Connections(names)
     }
 }
 
@@ -134,6 +144,7 @@ impl TemplateStore {
     }
 
     /// Parse header line: "Template Name [scope]" -> (name, scope)
+    /// Supports: [global], [conn], [conn1,conn2,conn3]
     fn parse_header(header: &str) -> Option<(String, TemplateScope)> {
         let header = header.trim();
         let bracket_start = header.rfind('[')?;
@@ -144,7 +155,13 @@ impl TemplateStore {
             let scope = if scope_str.eq_ignore_ascii_case("global") {
                 TemplateScope::Global
             } else {
-                TemplateScope::Connection(scope_str.to_string())
+                // Parse comma-separated connection names
+                let connections: Vec<String> = scope_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                TemplateScope::Connections(connections)
             };
             return Some((name, scope));
         }
@@ -160,7 +177,7 @@ impl TemplateStore {
     pub fn serialize_one(template: &Template) -> String {
         let scope_str = match &template.scope {
             TemplateScope::Global => "global".to_string(),
-            TemplateScope::Connection(name) => name.clone(),
+            TemplateScope::Connections(names) => names.join(","),
         };
         format!(
             "--- {} [{}]\n{}\n",
@@ -210,11 +227,24 @@ limit <limit>
         assert_eq!(templates[0].query, "select count(*) from <table>");
 
         assert_eq!(templates[1].name, "Active Users");
-        assert_eq!(
-            templates[1].scope,
-            TemplateScope::Connection("my-db".to_string())
-        );
+        assert_eq!(templates[1].scope, TemplateScope::connection("my-db"));
         assert!(templates[1].query.contains("where active = true"));
+    }
+
+    #[test]
+    fn test_parse_multi_connection() {
+        let content = "--- Shared Query [db1,db2,db3]\nselect 1\n";
+        let templates = TemplateStore::parse(content);
+        assert_eq!(templates.len(), 1);
+        assert_eq!(
+            templates[0].scope,
+            TemplateScope::connections(vec!["db1".into(), "db2".into(), "db3".into()])
+        );
+        // Should match any of the listed connections
+        assert!(templates[0].scope.matches("db1"));
+        assert!(templates[0].scope.matches("db2"));
+        assert!(templates[0].scope.matches("db3"));
+        assert!(!templates[0].scope.matches("db4"));
     }
 
     #[test]
@@ -228,13 +258,19 @@ limit <limit>
             Template {
                 name: "Local".to_string(),
                 query: "select 2".to_string(),
-                scope: TemplateScope::Connection("db".to_string()),
+                scope: TemplateScope::connection("db"),
+            },
+            Template {
+                name: "Multi".to_string(),
+                query: "select 3".to_string(),
+                scope: TemplateScope::connections(vec!["a".into(), "b".into()]),
             },
         ];
 
         let output = TemplateStore::serialize(&templates);
         assert!(output.contains("--- Test [global]"));
         assert!(output.contains("--- Local [db]"));
+        assert!(output.contains("--- Multi [a,b]"));
     }
 
     #[test]
@@ -254,7 +290,11 @@ limit <limit>
     #[test]
     fn test_scope_matches() {
         assert!(TemplateScope::Global.matches("any-db"));
-        assert!(TemplateScope::Connection("my-db".to_string()).matches("my-db"));
-        assert!(!TemplateScope::Connection("my-db".to_string()).matches("other-db"));
+        assert!(TemplateScope::connection("my-db").matches("my-db"));
+        assert!(!TemplateScope::connection("my-db").matches("other-db"));
+        // Multi-connection scope
+        assert!(TemplateScope::connections(vec!["a".into(), "b".into()]).matches("a"));
+        assert!(TemplateScope::connections(vec!["a".into(), "b".into()]).matches("b"));
+        assert!(!TemplateScope::connections(vec!["a".into(), "b".into()]).matches("c"));
     }
 }
