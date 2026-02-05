@@ -42,15 +42,14 @@ impl Controller {
             return;
         }
 
-        // Default scope based on current connection
-        let scope = match self.current_connection_name() {
-            Some(conn) => TemplateScope::connection(conn.to_string()),
-            None => TemplateScope::Global,
-        };
+        // Default to current connection
+        let connections = self.current_connection_name().unwrap_or("").to_string();
 
         self.popup_state = PopupState::SaveTemplate {
             name: String::new(),
-            scope,
+            is_global: false,
+            connections,
+            editing_connections: false,
         };
     }
 
@@ -63,8 +62,19 @@ impl Controller {
             } => {
                 self.handle_template_list_keys(key_event, *selected, filter.clone(), *searching);
             }
-            PopupState::SaveTemplate { name, scope } => {
-                self.handle_save_template_keys(key_event, name.clone(), scope.clone());
+            PopupState::SaveTemplate {
+                name,
+                is_global,
+                connections,
+                editing_connections,
+            } => {
+                self.handle_save_template_keys(
+                    key_event,
+                    name.clone(),
+                    *is_global,
+                    connections.clone(),
+                    *editing_connections,
+                );
             }
             PopupState::ConfirmDelete { index, name } => {
                 self.handle_confirm_delete_keys(key_event, *index, name.clone());
@@ -220,39 +230,72 @@ impl Controller {
         &mut self,
         key_event: KeyEvent,
         mut name: String,
-        mut scope: TemplateScope,
+        mut is_global: bool,
+        mut connections: String,
+        mut editing_connections: bool,
     ) {
         match key_event.code {
             KeyCode::Esc => {
                 self.popup_state = PopupState::None;
+                return;
             }
             KeyCode::Enter => {
                 if !name.trim().is_empty() {
+                    let scope = if is_global {
+                        TemplateScope::Global
+                    } else {
+                        let conns: Vec<String> = connections
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        if conns.is_empty() {
+                            TemplateScope::Global
+                        } else {
+                            TemplateScope::Connections(conns)
+                        }
+                    };
                     self.save_current_template(name.trim().to_string(), scope);
                     self.popup_state = PopupState::None;
                 }
+                return;
             }
             KeyCode::Tab => {
-                // Toggle between global and connection-specific
-                scope = match scope {
-                    TemplateScope::Global => match self.current_connection_name() {
-                        Some(conn) => TemplateScope::connection(conn),
-                        None => TemplateScope::Global,
-                    },
-                    TemplateScope::Connections(_) => TemplateScope::Global,
-                };
-                self.popup_state = PopupState::SaveTemplate { name, scope };
+                // Toggle global/local
+                is_global = !is_global;
+                if !is_global && connections.is_empty() {
+                    // Default to current connection when switching to local
+                    connections = self.current_connection_name().unwrap_or("").to_string();
+                }
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::BackTab => {
+                // Switch focus between name and connections (only when not global)
+                if !is_global {
+                    editing_connections = !editing_connections;
+                }
             }
             KeyCode::Char(c) => {
-                name.push(c);
-                self.popup_state = PopupState::SaveTemplate { name, scope };
+                if editing_connections && !is_global {
+                    connections.push(c);
+                } else {
+                    name.push(c);
+                }
             }
             KeyCode::Backspace => {
-                name.pop();
-                self.popup_state = PopupState::SaveTemplate { name, scope };
+                if editing_connections && !is_global {
+                    connections.pop();
+                } else {
+                    name.pop();
+                }
             }
             _ => {}
         }
+        self.popup_state = PopupState::SaveTemplate {
+            name,
+            is_global,
+            connections,
+            editing_connections,
+        };
     }
 
     fn handle_confirm_delete_keys(&mut self, key_event: KeyEvent, index: usize, _name: String) {

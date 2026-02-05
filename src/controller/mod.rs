@@ -86,7 +86,9 @@ pub enum PopupState {
     },
     SaveTemplate {
         name: String,
-        scope: crate::templates::TemplateScope,
+        is_global: bool,
+        connections: String,       // comma-separated connection names
+        editing_connections: bool, // true = editing connections, false = editing name
     },
     ConfirmDelete {
         index: usize,

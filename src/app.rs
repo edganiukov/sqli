@@ -772,8 +772,19 @@ impl App {
             } => {
                 self.draw_template_list_popup(frame, *selected, filter, *searching);
             }
-            PopupState::SaveTemplate { name, scope } => {
-                self.draw_save_template_popup(frame, name, scope);
+            PopupState::SaveTemplate {
+                name,
+                is_global,
+                connections,
+                editing_connections,
+            } => {
+                self.draw_save_template_popup(
+                    frame,
+                    name,
+                    *is_global,
+                    connections,
+                    *editing_connections,
+                );
             }
             PopupState::ConfirmDelete { name, .. } => {
                 self.draw_confirm_delete_popup(frame, name);
@@ -883,52 +894,117 @@ impl App {
         }
     }
 
-    fn draw_save_template_popup(&self, frame: &mut Frame, name: &str, scope: &TemplateScope) {
+    fn draw_save_template_popup(
+        &self,
+        frame: &mut Frame,
+        name: &str,
+        is_global: bool,
+        connections: &str,
+        editing_connections: bool,
+    ) {
         let area = frame.area();
-        let popup_area = centered_rect(area, 50, 9);
+        let popup_area = centered_rect(area, 50, if is_global { 9 } else { 11 });
         frame.render_widget(Clear, popup_area);
 
         let block = popup_block("Save Template", BLUE);
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // Label
-                Constraint::Length(1), // Input
+        let constraints = if is_global {
+            vec![
+                Constraint::Length(1), // Name label
+                Constraint::Length(1), // Name input
                 Constraint::Length(1), // Spacer
                 Constraint::Length(1), // Scope toggle
                 Constraint::Length(1), // Help
-            ])
+            ]
+        } else {
+            vec![
+                Constraint::Length(1), // Name label
+                Constraint::Length(1), // Name input
+                Constraint::Length(1), // Connections label
+                Constraint::Length(1), // Connections input
+                Constraint::Length(1), // Spacer
+                Constraint::Length(1), // Scope toggle
+                Constraint::Length(1), // Help
+            ]
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
             .margin(1)
             .split(inner);
 
+        // Name label and input
+        let name_focused = !editing_connections || is_global;
         frame.render_widget(
-            Paragraph::new("Template name:").style(Style::default().fg(TEXT)),
+            Paragraph::new("Template name:").style(Style::default().fg(if name_focused {
+                TEXT
+            } else {
+                TEXT_DIM
+            })),
             chunks[0],
         );
 
-        let input_display = format!("{}_", name);
+        let name_display = if name_focused {
+            format!("{}_", name)
+        } else {
+            name.to_string()
+        };
         frame.render_widget(
-            Paragraph::new(input_display).style(Style::default().fg(TEXT).bg(SURFACE_DIM)),
+            Paragraph::new(name_display).style(Style::default().fg(TEXT).bg(if name_focused {
+                SURFACE_DIM
+            } else {
+                SURFACE
+            })),
             chunks[1],
         );
 
-        let scope_text = match scope {
-            TemplateScope::Global => "[x] Global (all connections)".to_string(),
-            TemplateScope::Connections(conns) => format!("[ ] Local ({})", conns.join(",")),
-        };
-        frame.render_widget(
-            Paragraph::new(format!("Tab to toggle: {}", scope_text))
-                .style(Style::default().fg(TEXT_DIM)),
-            chunks[3],
-        );
+        if is_global {
+            // Global scope - no connections field
+            frame.render_widget(
+                Paragraph::new("Tab: [x] Global").style(Style::default().fg(TEXT_DIM)),
+                chunks[3],
+            );
+            frame.render_widget(
+                Paragraph::new("Enter save, Esc cancel").style(Style::default().fg(TEXT_DIM)),
+                chunks[4],
+            );
+        } else {
+            // Local scope - show connections field
+            frame.render_widget(
+                Paragraph::new("Connections (comma-separated):")
+                    .style(Style::default().fg(if editing_connections { TEXT } else { TEXT_DIM })),
+                chunks[2],
+            );
 
-        frame.render_widget(
-            Paragraph::new("Enter to save, Esc to cancel").style(Style::default().fg(TEXT_DIM)),
-            chunks[4],
-        );
+            let conn_display = if editing_connections {
+                format!("{}_", connections)
+            } else {
+                connections.to_string()
+            };
+            frame.render_widget(
+                Paragraph::new(conn_display).style(Style::default().fg(TEXT).bg(
+                    if editing_connections {
+                        SURFACE_DIM
+                    } else {
+                        SURFACE
+                    },
+                )),
+                chunks[3],
+            );
+
+            frame.render_widget(
+                Paragraph::new("Tab: [ ] Local | ↑↓ switch field")
+                    .style(Style::default().fg(TEXT_DIM)),
+                chunks[5],
+            );
+            frame.render_widget(
+                Paragraph::new("Enter save, Esc cancel").style(Style::default().fg(TEXT_DIM)),
+                chunks[6],
+            );
+        }
     }
 
     fn draw_confirm_delete_popup(&self, frame: &mut Frame, template_name: &str) {
