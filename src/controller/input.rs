@@ -357,12 +357,13 @@ impl Controller {
         }
 
         // Calculate actual visible height based on terminal size
+        // Must match the rendering calculation in app.rs draw_query_output
         let term_size = crossterm::terminal::size().unwrap_or((80, 24));
         let main_area_height = term_size.1.saturating_sub(3); // minus tab bar, status, command
-        let query_height = main_area_height * 35 / 100;
-        let output_height = main_area_height - query_height;
-        // Subtract 2 for title and header row
-        let visible_height = output_height.saturating_sub(2) as usize;
+        // Output area is 65% of main area (query is 35%)
+        let output_height = main_area_height * 65 / 100;
+        // Subtract: 1 for title, 1 for header row, 1 extra for rounding safety
+        let visible_height = output_height.saturating_sub(3).max(1) as usize;
 
         let tab = self.current_tab_mut();
 
