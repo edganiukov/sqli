@@ -644,7 +644,7 @@ impl Controller {
         let mut current_x = 0u16;
 
         for (i, tab) in self.tabs.iter().enumerate() {
-            let tab_width = (tab.name.len() + 2) as u16; // " TabName "
+            let tab_width = (tab.name.len() + 4) as u16; //  [TabName] 
 
             if x >= current_x && x < current_x + tab_width {
                 self.current_tab = i;

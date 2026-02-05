@@ -107,7 +107,7 @@ impl App {
     fn draw_tabs(&self, frame: &mut Frame, area: Rect) {
         let mut spans = vec![];
         for (i, tab) in self.controller.tabs.iter().enumerate() {
-            let tab_name = format!(" {} ", tab.name);
+            let tab_name = format!(" [{}] ", tab.name);
             let style = if i == self.controller.current_tab {
                 Style::default()
                     .fg(SURFACE)
