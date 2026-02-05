@@ -90,10 +90,8 @@ fn run(
         }
 
         terminal.draw(|frame| app.draw(frame))?;
-
         // Poll pending async operations
         app.poll_pending();
-
         // Drain all available events before redrawing
         if event::poll(std::time::Duration::from_millis(100))? {
             loop {
@@ -121,7 +119,6 @@ fn run(
 
         // Tick spinner
         app.tick_spinner();
-
         if app.quit() {
             break;
         }
