@@ -233,19 +233,34 @@ pub fn draw_record_detail(
     frame.render_widget(Clear, popup_area);
 
     let title = format!(
-        "Record {} of {} ── Field {} of {}",
+        "Record {}/{}  ─  Field {}/{}",
         row_index + 1,
         rows.len(),
         selected_field + 1,
         columns.len()
     );
     let block = popup_block(&title, BLUE);
-    let inner = block.inner(popup_area);
+    let block_inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    // Reserve space for help line at bottom
+    let inner = Rect {
+        x: block_inner.x,
+        y: block_inner.y,
+        width: block_inner.width,
+        height: block_inner.height.saturating_sub(2),
+    };
+    let help_area = Rect {
+        x: block_inner.x,
+        y: block_inner.y + block_inner.height.saturating_sub(1),
+        width: block_inner.width,
+        height: 1,
+    };
 
     // Calculate the maximum field name width for alignment
     let max_name_width = columns.iter().map(|c| c.len()).max().unwrap_or(0);
-    let value_width = inner.width.saturating_sub(max_name_width as u16 + 4) as usize;
+    let left_padding = 2;
+    let value_width = inner.width.saturating_sub(max_name_width as u16 + 4 + left_padding) as usize;
 
     // Build lines for each field, tracking which line each field starts at
     let mut lines: Vec<Line> = Vec::new();
@@ -255,7 +270,7 @@ pub fn draw_record_detail(
         field_start_lines.push(lines.len());
 
         let is_selected = field_idx == selected_field;
-        let field_name = format!("{:>width$}", col, width = max_name_width);
+        let field_name = format!("{:<width$}", col, width = max_name_width);
 
         // Style based on selection
         let name_style = if is_selected {
@@ -277,8 +292,10 @@ pub fn draw_record_detail(
             Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)
         };
 
+        let pad = "  ";
         if value.is_empty() {
             lines.push(Line::from(vec![
+                Span::raw(pad),
                 Span::styled(field_name, name_style),
                 Span::styled(" : ", dim()),
                 Span::styled("(empty)", empty_style),
@@ -289,13 +306,14 @@ pub fn draw_record_detail(
             for (i, line_text) in value_lines.iter().enumerate() {
                 if i == 0 {
                     lines.push(Line::from(vec![
+                        Span::raw(pad),
                         Span::styled(field_name.clone(), name_style),
                         Span::styled(" : ", dim()),
                         Span::styled(line_text.clone(), value_style),
                     ]));
                 } else {
                     // Continuation lines - indent to align with value
-                    let indent = " ".repeat(max_name_width + 3);
+                    let indent = " ".repeat(max_name_width + 3 + pad.len());
                     lines.push(Line::from(vec![
                         Span::styled(indent, Style::default()),
                         Span::styled(line_text.clone(), value_style),
@@ -359,6 +377,20 @@ pub fn draw_record_detail(
         };
         frame.render_widget(Paragraph::new(scrollbar).style(dim()), scrollbar_area);
     }
+
+    // Help line at bottom
+    let help = Line::from(vec![
+        Span::styled("j/k", Style::default().fg(TEXT)),
+        Span::styled(" navigate  ", dim()),
+        Span::styled("y", Style::default().fg(TEXT)),
+        Span::styled(" copy value  ", dim()),
+        Span::styled("Esc", Style::default().fg(TEXT)),
+        Span::styled(" close", dim()),
+    ]);
+    frame.render_widget(
+        Paragraph::new(help).alignment(Alignment::Center),
+        help_area,
+    );
 }
 
 /// Draw completion popup
