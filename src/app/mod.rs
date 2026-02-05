@@ -245,7 +245,7 @@ impl App {
             height: list_height,
         };
 
-        let conn_count = tab.connections.len();
+        let conn_count = filtered.len();
         let title = format!(" Connections ({}) ", conn_count);
         let block = Block::default()
             .title(title)
