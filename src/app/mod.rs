@@ -348,7 +348,7 @@ impl App {
         };
 
         let block = Block::default()
-            .title(" Select Database ")
+            .title(format!(" Select Database ({}) ", tab.databases.len()))
             .title_style(accent_bold())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
