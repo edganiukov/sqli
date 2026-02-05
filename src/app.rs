@@ -774,17 +774,10 @@ impl App {
             }
             PopupState::SaveTemplate {
                 name,
-                is_global,
                 connections,
                 editing_connections,
             } => {
-                self.draw_save_template_popup(
-                    frame,
-                    name,
-                    *is_global,
-                    connections,
-                    *editing_connections,
-                );
+                self.draw_save_template_popup(frame, name, connections, *editing_connections);
             }
             PopupState::ConfirmDelete { name, .. } => {
                 self.draw_confirm_delete_popup(frame, name);
@@ -898,46 +891,33 @@ impl App {
         &self,
         frame: &mut Frame,
         name: &str,
-        is_global: bool,
         connections: &str,
         editing_connections: bool,
     ) {
         let area = frame.area();
-        let popup_area = centered_rect(area, 50, if is_global { 9 } else { 11 });
+        let popup_area = centered_rect(area, 50, 10);
         frame.render_widget(Clear, popup_area);
 
         let block = popup_block("Save Template", BLUE);
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
 
-        let constraints = if is_global {
-            vec![
-                Constraint::Length(1), // Name label
-                Constraint::Length(1), // Name input
-                Constraint::Length(1), // Spacer
-                Constraint::Length(1), // Scope toggle
-                Constraint::Length(1), // Help
-            ]
-        } else {
-            vec![
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
                 Constraint::Length(1), // Name label
                 Constraint::Length(1), // Name input
                 Constraint::Length(1), // Connections label
                 Constraint::Length(1), // Connections input
                 Constraint::Length(1), // Spacer
-                Constraint::Length(1), // Scope toggle
                 Constraint::Length(1), // Help
-            ]
-        };
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(constraints)
+            ])
             .margin(1)
             .split(inner);
 
+        let name_focused = !editing_connections;
+
         // Name label and input
-        let name_focused = !editing_connections || is_global;
         frame.render_widget(
             Paragraph::new("Template name:").style(Style::default().fg(if name_focused {
                 TEXT
@@ -961,50 +941,42 @@ impl App {
             chunks[1],
         );
 
-        if is_global {
-            // Global scope - no connections field
-            frame.render_widget(
-                Paragraph::new("Tab: [x] Global").style(Style::default().fg(TEXT_DIM)),
-                chunks[3],
-            );
-            frame.render_widget(
-                Paragraph::new("Enter save, Esc cancel").style(Style::default().fg(TEXT_DIM)),
-                chunks[4],
-            );
-        } else {
-            // Local scope - show connections field
-            frame.render_widget(
-                Paragraph::new("Connections (comma-separated):")
-                    .style(Style::default().fg(if editing_connections { TEXT } else { TEXT_DIM })),
-                chunks[2],
-            );
+        // Connections label and input
+        frame.render_widget(
+            Paragraph::new("Connections (empty = global):")
+                .style(Style::default().fg(if editing_connections { TEXT } else { TEXT_DIM })),
+            chunks[2],
+        );
 
-            let conn_display = if editing_connections {
-                format!("{}_", connections)
-            } else {
-                connections.to_string()
-            };
-            frame.render_widget(
-                Paragraph::new(conn_display).style(Style::default().fg(TEXT).bg(
-                    if editing_connections {
+        let conn_display = if editing_connections {
+            format!("{}_", connections)
+        } else if connections.is_empty() {
+            "(global)".to_string()
+        } else {
+            connections.to_string()
+        };
+        frame.render_widget(
+            Paragraph::new(conn_display).style(
+                Style::default()
+                    .fg(if connections.is_empty() && !editing_connections {
+                        TEXT_DIM
+                    } else {
+                        TEXT
+                    })
+                    .bg(if editing_connections {
                         SURFACE_DIM
                     } else {
                         SURFACE
-                    },
-                )),
-                chunks[3],
-            );
+                    }),
+            ),
+            chunks[3],
+        );
 
-            frame.render_widget(
-                Paragraph::new("Tab: [ ] Local | ↑↓ switch field")
-                    .style(Style::default().fg(TEXT_DIM)),
-                chunks[5],
-            );
-            frame.render_widget(
-                Paragraph::new("Enter save, Esc cancel").style(Style::default().fg(TEXT_DIM)),
-                chunks[6],
-            );
-        }
+        frame.render_widget(
+            Paragraph::new("Tab/↑↓ switch field | Enter save | Esc cancel")
+                .style(Style::default().fg(TEXT_DIM)),
+            chunks[5],
+        );
     }
 
     fn draw_confirm_delete_popup(&self, frame: &mut Frame, template_name: &str) {

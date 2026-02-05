@@ -47,7 +47,6 @@ impl Controller {
 
         self.popup_state = PopupState::SaveTemplate {
             name: String::new(),
-            is_global: false,
             connections,
             editing_connections: false,
         };
@@ -64,14 +63,12 @@ impl Controller {
             }
             PopupState::SaveTemplate {
                 name,
-                is_global,
                 connections,
                 editing_connections,
             } => {
                 self.handle_save_template_keys(
                     key_event,
                     name.clone(),
-                    *is_global,
                     connections.clone(),
                     *editing_connections,
                 );
@@ -230,7 +227,6 @@ impl Controller {
         &mut self,
         key_event: KeyEvent,
         mut name: String,
-        mut is_global: bool,
         mut connections: String,
         mut editing_connections: bool,
     ) {
@@ -241,48 +237,34 @@ impl Controller {
             }
             KeyCode::Enter => {
                 if !name.trim().is_empty() {
-                    let scope = if is_global {
+                    let conns: Vec<String> = connections
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let scope = if conns.is_empty() {
                         TemplateScope::Global
                     } else {
-                        let conns: Vec<String> = connections
-                            .split(',')
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        if conns.is_empty() {
-                            TemplateScope::Global
-                        } else {
-                            TemplateScope::Connections(conns)
-                        }
+                        TemplateScope::Connections(conns)
                     };
                     self.save_current_template(name.trim().to_string(), scope);
                     self.popup_state = PopupState::None;
                 }
                 return;
             }
-            KeyCode::Tab => {
-                // Toggle global/local
-                is_global = !is_global;
-                if !is_global && connections.is_empty() {
-                    // Default to current connection when switching to local
-                    connections = self.current_connection_name().unwrap_or("").to_string();
-                }
-            }
-            KeyCode::Up | KeyCode::Down | KeyCode::BackTab => {
-                // Switch focus between name and connections (only when not global)
-                if !is_global {
-                    editing_connections = !editing_connections;
-                }
+            KeyCode::Tab | KeyCode::Up | KeyCode::Down | KeyCode::BackTab => {
+                // Switch focus between name and connections
+                editing_connections = !editing_connections;
             }
             KeyCode::Char(c) => {
-                if editing_connections && !is_global {
+                if editing_connections {
                     connections.push(c);
                 } else {
                     name.push(c);
                 }
             }
             KeyCode::Backspace => {
-                if editing_connections && !is_global {
+                if editing_connections {
                     connections.pop();
                 } else {
                     name.pop();
@@ -292,7 +274,6 @@ impl Controller {
         }
         self.popup_state = PopupState::SaveTemplate {
             name,
-            is_global,
             connections,
             editing_connections,
         };

@@ -86,9 +86,8 @@ pub enum PopupState {
     },
     SaveTemplate {
         name: String,
-        is_global: bool,
-        connections: String,       // comma-separated connection names
-        editing_connections: bool, // true = editing connections, false = editing name
+        connections: String, // comma-separated; empty = global
+        editing_connections: bool,
     },
     ConfirmDelete {
         index: usize,
