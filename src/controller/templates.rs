@@ -7,7 +7,7 @@ impl Controller {
     fn current_connection_name(&self) -> Option<&str> {
         let tab = self.current_tab();
         tab.connections
-            .get(tab.selected_index)
+            .get(tab.connected_index)
             .map(|c| c.name.as_str())
     }
 
