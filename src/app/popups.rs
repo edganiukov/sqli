@@ -34,9 +34,24 @@ pub fn draw_template_list(
     frame.render_widget(Clear, popup_area);
 
     // Render block first and get inner area
-    let block = popup_block("Templates (/ search, Ctrl+G edit, Ctrl+D delete)", BLUE);
-    let inner_area = block.inner(popup_area);
+    let title = format!("Templates ({})", all_templates.len());
+    let block = popup_block(&title, BLUE);
+    let block_inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    // Reserve space for help line at bottom
+    let inner_area = Rect {
+        x: block_inner.x,
+        y: block_inner.y,
+        width: block_inner.width,
+        height: block_inner.height.saturating_sub(2),
+    };
+    let help_area = Rect {
+        x: block_inner.x,
+        y: block_inner.y + block_inner.height.saturating_sub(1),
+        width: block_inner.width,
+        height: 1,
+    };
 
     // Split inner area if searching (list + search bar inside the border)
     let (list_area, search_area) = if searching {
@@ -53,8 +68,8 @@ pub fn draw_template_list(
         .iter()
         .map(|t| {
             let scope_str = match &t.scope {
-                TemplateScope::Global => "[global]".to_string(),
-                TemplateScope::Connections(names) => format!("[{}]", names.join(",")),
+                TemplateScope::Global => "global".to_string(),
+                TemplateScope::Connections(names) => names.join(","),
             };
             let preview: String = t
                 .query
@@ -62,14 +77,13 @@ pub fn draw_template_list(
                 .next()
                 .unwrap_or("")
                 .chars()
-                .take(40)
+                .take(50)
                 .collect();
 
             ListItem::new(vec![
                 Line::from(vec![
-                    Span::styled(scope_str, dim()),
-                    Span::raw(" "),
                     Span::styled(&t.name, bold(TEXT)),
+                    Span::styled(format!("  ({})", scope_str), dim()),
                 ]),
                 Line::from(Span::styled(format!("  {}", preview), dim())),
             ])
@@ -92,6 +106,22 @@ pub fn draw_template_list(
 
         frame.render_widget(search_paragraph, search_area);
     }
+
+    // Help line at bottom
+    let help = Line::from(vec![
+        Span::styled("/", Style::default().fg(TEXT)),
+        Span::styled(" search  ", dim()),
+        Span::styled("^G", Style::default().fg(TEXT)),
+        Span::styled(" edit  ", dim()),
+        Span::styled("^D", Style::default().fg(TEXT)),
+        Span::styled(" delete  ", dim()),
+        Span::styled("Esc", Style::default().fg(TEXT)),
+        Span::styled(" close", dim()),
+    ]);
+    frame.render_widget(
+        Paragraph::new(help).alignment(Alignment::Center),
+        help_area,
+    );
 }
 
 /// Draw save template popup
