@@ -212,8 +212,11 @@ impl App {
                     format!(" {}:{}", conn.host, conn.port)
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{}]", conn.db_type.as_str()), dim()),
-                    Span::raw(" "),
+                    Span::styled(
+                        format!("{:>2}", conn.db_type.short_label()),
+                        Style::default().fg(TEXT_DIM),
+                    ),
+                    Span::styled(" | ", dim()),
                     Span::styled(&conn.name, bold(TEXT)),
                     Span::styled(location, dim()),
                 ]))
@@ -242,8 +245,10 @@ impl App {
             height: list_height,
         };
 
+        let conn_count = tab.connections.len();
+        let title = format!(" Connections ({}) ", conn_count);
         let block = Block::default()
-            .title(" Connections ")
+            .title(title)
             .title_style(accent_bold())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -271,7 +276,7 @@ impl App {
             let mut spans = vec![];
             for (i, group) in tab.connection_groups.iter().enumerate() {
                 if i > 0 {
-                    spans.push(Span::styled(" │ ", dim()));
+                    spans.push(Span::styled(" | ", dim()));
                 }
                 let style = if i == tab.selected_group {
                     Style::default()

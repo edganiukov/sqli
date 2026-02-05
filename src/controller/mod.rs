@@ -126,6 +126,16 @@ impl DatabaseType {
         }
     }
 
+    pub fn short_label(&self) -> &str {
+        match self {
+            DatabaseType::Postgres => "pg",
+            DatabaseType::MySql => "my",
+            DatabaseType::Cassandra => "cs",
+            DatabaseType::ClickHouse => "ch",
+            DatabaseType::Sqlite => "sq",
+        }
+    }
+
     pub fn default_database(&self) -> &'static str {
         match self {
             DatabaseType::Postgres => "postgres",
