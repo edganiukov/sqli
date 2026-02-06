@@ -34,7 +34,7 @@ impl Controller {
             super::PendingOperation::ListDatabases { .. } | super::PendingOperation::Connect { .. }
         ) {
             if tab.db_client.is_some() {
-                // Already connected — return to database view
+                // Already connected - return to database view
                 tab.view_state = ViewState::DatabaseView;
             } else {
                 tab.view_state = ViewState::ConnectionList;
@@ -96,11 +96,11 @@ impl Controller {
             KeyCode::Esc => {
                 let tab = self.current_tab_mut();
                 if tab.db_client.is_some() {
-                    // Already connected — go back to database view
+                    // Already connected - go back to database view
                     tab.view_state = ViewState::DatabaseView;
                     tab.databases.clear();
                 } else {
-                    // Not connected — go back to connection list
+                    // Not connected - go back to connection list
                     tab.view_state = ViewState::ConnectionList;
                     tab.name = "New".to_string();
                     tab.databases.clear();
@@ -660,7 +660,7 @@ impl Controller {
         let mut current_x = 0u16;
 
         for (i, tab) in self.tabs.iter().enumerate() {
-            let tab_width = (tab.name.len() + 4) as u16; //  [TabName] 
+            let tab_width = (tab.name.len() + 4) as u16; //  [TabName]
 
             if x >= current_x && x < current_x + tab_width {
                 self.current_tab = i;
@@ -782,10 +782,10 @@ impl Controller {
 
             // Calculate which row was clicked
             // Output area starts after: tab bar (1) + query area (query_height)
-            // Inside output: panel title/border (1), table header row (1)
-            // When table has more rows than visible height, there's an extra row offset
+            // Inside output: panel title (1), table header row (1), then data rows
+            // When rows exceed visible height, ratatui's Table adds an extra row offset
             let output_height = main_area_height * 65 / 100;
-            let visible_height = output_height.saturating_sub(2) as usize; // -1 title, -1 header
+            let visible_height = output_height.saturating_sub(2) as usize;
 
             let row_count = self.current_tab().query_result.as_ref().map_or(0, |r| {
                 if let crate::db::QueryResult::Select { rows, .. } = r {
