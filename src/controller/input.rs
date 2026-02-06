@@ -783,23 +783,28 @@ impl Controller {
             // Calculate which row was clicked
             // Output area starts after: tab bar (1) + query area (query_height)
             // Inside output: panel title (1), table header row (1), then data rows
-            // When rows exceed visible height, ratatui's Table adds an extra row offset
-            let output_height = main_area_height * 65 / 100;
-            let visible_height = output_height.saturating_sub(2) as usize;
+            // macOS always needs +3 offset; Linux needs +3 only when rows overflow
+            let data_y_start = 1 + query_height + 2;
+            // #[cfg(target_os = "macos")]
+            // let data_y_start = 1 + query_height + 3;
 
-            let row_count = self.current_tab().query_result.as_ref().map_or(0, |r| {
-                if let crate::db::QueryResult::Select { rows, .. } = r {
-                    rows.len()
-                } else {
-                    0
-                }
-            });
-
-            let data_y_start = if row_count > visible_height {
-                1 + query_height + 3
-            } else {
-                1 + query_height + 2
-            };
+            // #[cfg(not(target_os = "macos"))]
+            // let data_y_start = {
+            //     let output_height = main_area_height * 65 / 100;
+            //     let visible_height = output_height.saturating_sub(2) as usize;
+            //     let row_count = self.current_tab().query_result.as_ref().map_or(0, |r| {
+            //         if let crate::db::QueryResult::Select { rows, .. } = r {
+            //             rows.len()
+            //         } else {
+            //             0
+            //         }
+            //     });
+            //     if row_count > visible_height {
+            //         1 + query_height + 3
+            //     } else {
+            //         1 + query_height + 2
+            //     }
+            // };
             if y < data_y_start {
                 return;
             }
