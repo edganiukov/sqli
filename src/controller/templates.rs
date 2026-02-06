@@ -22,6 +22,7 @@ impl Controller {
             .collect();
 
         if self.template_list_cache.is_empty() {
+            self.popup_state = PopupState::None;
             self.current_tab_mut().status_message =
                 Some("No templates saved. Use Ctrl+S to save a template.".to_string());
             return;
@@ -73,8 +74,8 @@ impl Controller {
                     *editing_connections,
                 );
             }
-            PopupState::ConfirmDelete { index, name } => {
-                self.handle_confirm_delete_keys(key_event, *index, name.clone());
+            PopupState::ConfirmDelete { index, name, filter } => {
+                self.handle_confirm_delete_keys(key_event, *index, name.clone(), filter.clone());
             }
             PopupState::RecordDetail { .. } => {
                 // Handled in handle_output_keys
@@ -203,6 +204,7 @@ impl Controller {
                         self.popup_state = PopupState::ConfirmDelete {
                             index: selected,
                             name: template.name.clone(),
+                            filter: filter.clone(),
                         };
                     }
                 }
@@ -279,33 +281,38 @@ impl Controller {
         };
     }
 
-    fn handle_confirm_delete_keys(&mut self, key_event: KeyEvent, index: usize, _name: String) {
+    fn handle_confirm_delete_keys(
+        &mut self,
+        key_event: KeyEvent,
+        index: usize,
+        name: String,
+        filter: String,
+    ) {
         match key_event.code {
             KeyCode::Char('y') | KeyCode::Enter => {
-                // Find the actual index in template_store
-                if let Some(template) = self.template_list_cache.get(index) {
-                    // Find and delete from store
-                    let template_name = template.name.clone();
-                    if let Some(store_idx) = self
-                        .template_store
-                        .templates
-                        .iter()
-                        .position(|t| t.name == template_name)
-                    {
-                        self.template_store.delete_template(store_idx);
-                        let _ = self.template_store.save();
-                        self.current_tab_mut().status_message =
-                            Some(format!("Deleted template '{}'", template_name));
-                    }
+                // Delete by name (safer than index since list may have changed)
+                if let Some(store_idx) = self
+                    .template_store
+                    .templates
+                    .iter()
+                    .position(|t| t.name == name)
+                {
+                    self.template_store.delete_template(store_idx);
+                    let _ = self.template_store.save();
+                    self.current_tab_mut().status_message =
+                        Some(format!("Deleted template '{}'", name));
                 }
                 // Refresh and go back to list
                 self.open_template_popup();
             }
             KeyCode::Char('n') | KeyCode::Esc => {
-                // Go back to template list
+                // Go back to template list, restoring filter
+                // Clamp index to valid range after potential list changes
+                let filtered = self.filtered_templates(&filter);
+                let new_index = index.min(filtered.len().saturating_sub(1));
                 self.popup_state = PopupState::TemplateList {
-                    selected: index,
-                    filter: String::new(),
+                    selected: new_index,
+                    filter,
                     searching: false,
                 };
             }

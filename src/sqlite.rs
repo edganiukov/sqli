@@ -62,45 +62,52 @@ impl SqliteClient {
     }
 
     pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
-        let conn = self
+        // Use block_in_place to signal to tokio that this is a blocking operation
+        // This prevents blocking the async runtime's worker threads
+        let query = query.to_string();
+        let conn_guard = self
             .conn
             .lock()
             .map_err(|e| SqliError::Other(e.to_string()))?;
-        let query_upper = query.trim().to_uppercase();
 
-        if query_upper.starts_with("SELECT")
-            || query_upper.starts_with("PRAGMA")
-            || query_upper.starts_with("WITH")
-            || query_upper.starts_with("EXPLAIN")
-        {
-            let mut stmt = conn
-                .prepare(query)
-                .map_err(|e| SqliError::Query(e.to_string()))?;
+        tokio::task::block_in_place(|| {
+            let query_upper = query.trim().to_uppercase();
 
-            let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+            if query_upper.starts_with("SELECT")
+                || query_upper.starts_with("PRAGMA")
+                || query_upper.starts_with("WITH")
+                || query_upper.starts_with("EXPLAIN")
+            {
+                let mut stmt = conn_guard
+                    .prepare(&query)
+                    .map_err(|e| SqliError::Query(e.to_string()))?;
 
-            let rows: Vec<Vec<String>> = stmt
-                .query_map([], |row| {
-                    let mut values = Vec::with_capacity(columns.len());
-                    for i in 0..columns.len() {
-                        values.push(Self::format_value(row.get_ref(i).ok()));
-                    }
-                    Ok(values)
+                let columns: Vec<String> =
+                    stmt.column_names().iter().map(|c| c.to_string()).collect();
+
+                let rows: Vec<Vec<String>> = stmt
+                    .query_map([], |row| {
+                        let mut values = Vec::with_capacity(columns.len());
+                        for i in 0..columns.len() {
+                            values.push(Self::format_value(row.get_ref(i).ok()));
+                        }
+                        Ok(values)
+                    })
+                    .map_err(|e| SqliError::Query(e.to_string()))?
+                    .filter_map(|r| r.ok())
+                    .collect();
+
+                Ok(QueryResult::Select { columns, rows })
+            } else {
+                let rows_affected = conn_guard
+                    .execute(&query, [])
+                    .map_err(|e| SqliError::Query(e.to_string()))?;
+
+                Ok(QueryResult::Execute {
+                    rows_affected: rows_affected as u64,
                 })
-                .map_err(|e| SqliError::Query(e.to_string()))?
-                .filter_map(|r| r.ok())
-                .collect();
-
-            Ok(QueryResult::Select { columns, rows })
-        } else {
-            let rows_affected = conn
-                .execute(query, [])
-                .map_err(|e| SqliError::Query(e.to_string()))?;
-
-            Ok(QueryResult::Execute {
-                rows_affected: rows_affected as u64,
-            })
-        }
+            }
+        })
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, _schema: Option<&str>) -> String {

@@ -151,7 +151,7 @@ impl App {
         };
 
         let status_line = if view_state == ViewState::DatabaseView {
-            let conn = tab.connections.get(tab.selected_index);
+            let conn = tab.connections.get(tab.connected_index);
             let db_name = tab.current_database.as_deref().unwrap_or("(none)");
             let table_name = tab
                 .sidebar

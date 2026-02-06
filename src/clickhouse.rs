@@ -120,6 +120,7 @@ impl ClickHouseClient {
             || query_upper.starts_with("SHOW")
             || query_upper.starts_with("DESCRIBE")
             || query_upper.starts_with("EXPLAIN")
+            || query_upper.starts_with("WITH")
         {
             let query_with_format = format!("{} format JSON", query.trim().trim_end_matches(';'));
 

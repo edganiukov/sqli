@@ -112,12 +112,14 @@ pub fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
                     current.push(' ');
                 }
                 current.push_str(word);
-            } else if word.len() > max_width {
+            } else if word.chars().count() > max_width {
                 if !current.is_empty() {
                     lines.push(std::mem::take(&mut current));
                 }
-                for chunk in word.as_bytes().chunks(max_width) {
-                    lines.push(String::from_utf8_lossy(chunk).into_owned());
+                // Split by characters, not bytes, to avoid breaking UTF-8
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(max_width) {
+                    lines.push(chunk.iter().collect());
                 }
             } else {
                 if !current.is_empty() {

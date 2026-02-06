@@ -68,6 +68,7 @@ impl MySqlClient {
             || query_upper.starts_with("SHOW")
             || query_upper.starts_with("DESCRIBE")
             || query_upper.starts_with("EXPLAIN")
+            || query_upper.starts_with("WITH")
         {
             let mut result = conn.query_iter(query).await?;
 

@@ -5,7 +5,6 @@ use crate::error::SqliError;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tui_textarea::TextArea;
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -69,7 +68,10 @@ impl Controller {
         self.runtime.spawn(async move {
             let db_name = conn.db_type.default_database().to_string();
             let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let client = conn.create_client(&db_name).await?;
+                let (client, pwd_warning) = conn.create_client(&db_name).await?;
+                if let Some(warn) = pwd_warning {
+                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
+                }
                 client.list_databases(include_system).await
             })
             .await
@@ -113,7 +115,10 @@ impl Controller {
         self.runtime.spawn(async move {
             let db_name = conn.db_type.default_database().to_string();
             let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let client = conn.create_client(&db_name).await?;
+                let (client, pwd_warning) = conn.create_client(&db_name).await?;
+                if let Some(warn) = pwd_warning {
+                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
+                }
                 client.list_databases(include_system).await
             })
             .await
@@ -144,7 +149,10 @@ impl Controller {
         self.runtime.spawn(async move {
             let db_name = conn.db_type.default_database().to_string();
             let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let client = conn.create_client(&db_name).await?;
+                let (client, pwd_warning) = conn.create_client(&db_name).await?;
+                if let Some(warn) = pwd_warning {
+                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
+                }
                 client.list_databases(include_system).await
             })
             .await
@@ -201,7 +209,10 @@ impl Controller {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
             let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let client = conn.create_client(&connect_db).await?;
+                let (client, pwd_warning) = conn.create_client(&connect_db).await?;
+                if let Some(warn) = pwd_warning {
+                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
+                }
                 let tables = client.list_tables(&schema).await?;
                 Ok((client, tables))
             })
@@ -215,19 +226,90 @@ impl Controller {
             conn_name,
             db_name: db_name_clone,
         });
-        self.query_textarea = TextArea::default();
     }
 
     pub(super) fn execute_query(&mut self) {
-        let query: String = self
-            .query_textarea
-            .lines()
-            .iter()
-            .filter(|line| !line.trim_start().starts_with("--"))
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let raw_query: String = self.query_textarea.lines().join("\n");
+        let query = Self::strip_comments(&raw_query);
         self.run_query(&query);
+    }
+
+    /// Strip SQL comments while respecting string literals.
+    /// Handles:
+    /// - Single-line comments (-- ...)
+    /// - Multi-line comments (/* ... */)
+    /// - String literals ('...' and "...")
+    fn strip_comments(query: &str) -> String {
+        let mut result = String::with_capacity(query.len());
+        let mut chars = query.chars().peekable();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+
+        while let Some(ch) = chars.next() {
+            // Handle string literals (SQL escapes quotes by doubling: '' or "")
+            if ch == '\'' && !in_double_quote {
+                if in_single_quote && chars.peek() == Some(&'\'') {
+                    // Escaped quote inside string: '' — push both and stay in string
+                    result.push(ch);
+                    result.push(chars.next().unwrap());
+                    continue;
+                }
+                in_single_quote = !in_single_quote;
+                result.push(ch);
+                continue;
+            }
+            if ch == '"' && !in_single_quote {
+                if in_double_quote && chars.peek() == Some(&'"') {
+                    // Escaped quote inside identifier: "" — push both and stay in string
+                    result.push(ch);
+                    result.push(chars.next().unwrap());
+                    continue;
+                }
+                in_double_quote = !in_double_quote;
+                result.push(ch);
+                continue;
+            }
+
+            // Skip comments only when not in a string
+            if !in_single_quote && !in_double_quote {
+                // Single-line comment: --
+                if ch == '-' && chars.peek() == Some(&'-') {
+                    // Skip until end of line
+                    for c in chars.by_ref() {
+                        if c == '\n' {
+                            result.push('\n'); // Preserve line structure
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                // Multi-line comment: /* ... */
+                if ch == '/' && chars.peek() == Some(&'*') {
+                    chars.next(); // consume '*'
+                    // Skip until */
+                    let mut found_end = false;
+                    while let Some(c) = chars.next() {
+                        if c == '*' && chars.peek() == Some(&'/') {
+                            chars.next(); // consume '/'
+                            found_end = true;
+                            break;
+                        }
+                        // Preserve newlines for line counting
+                        if c == '\n' {
+                            result.push('\n');
+                        }
+                    }
+                    if !found_end {
+                        // Unclosed comment - just skip to end
+                    }
+                    continue;
+                }
+            }
+
+            result.push(ch);
+        }
+
+        result
     }
 
     pub(super) fn refresh_tables(&mut self) {
@@ -294,13 +376,57 @@ impl Controller {
         Some(f(client, table, db_name))
     }
 
-    /// Split query text into individual statements by semicolon
+    /// Split query text into individual statements by semicolon.
+    /// Handles semicolons inside string literals (both single and double quotes).
     fn split_queries(query: &str) -> Vec<String> {
-        query
-            .split(';')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        let mut statements = Vec::new();
+        let mut current = String::new();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut chars = query.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\'' if !in_double_quote => {
+                    if in_single_quote && chars.peek() == Some(&'\'') {
+                        // Escaped quote: '' — push both and stay in string
+                        current.push(ch);
+                        current.push(chars.next().unwrap());
+                    } else {
+                        in_single_quote = !in_single_quote;
+                        current.push(ch);
+                    }
+                }
+                '"' if !in_single_quote => {
+                    if in_double_quote && chars.peek() == Some(&'"') {
+                        // Escaped quote: "" — push both and stay in identifier
+                        current.push(ch);
+                        current.push(chars.next().unwrap());
+                    } else {
+                        in_double_quote = !in_double_quote;
+                        current.push(ch);
+                    }
+                }
+                ';' if !in_single_quote && !in_double_quote => {
+                    let trimmed = current.trim().to_string();
+                    if !trimmed.is_empty() {
+                        statements.push(trimmed);
+                    }
+                    current.clear();
+                }
+                _ => {
+                    current.push(ch);
+                }
+            }
+        }
+
+        // Don't forget the last statement
+        let trimmed = current.trim().to_string();
+        if !trimmed.is_empty() {
+            statements.push(trimmed);
+        }
+
+        statements
     }
 
     /// Execute a query string (may contain multiple statements separated by `;`)

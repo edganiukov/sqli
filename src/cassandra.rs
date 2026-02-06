@@ -73,22 +73,20 @@ impl CassandraClient {
     }
 
     pub async fn list_tables(&self, keyspace: &str) -> Result<Vec<String>> {
+        // Use WHERE clause to filter server-side for efficiency
         let rows = self
             .session
             .query_unpaged(
-                "SELECT keyspace_name, table_name FROM system_schema.tables",
-                &[],
+                "SELECT table_name FROM system_schema.tables WHERE keyspace_name = ?",
+                (keyspace,),
             )
             .await?;
 
         let mut tables = Vec::new();
         if let Some(rows) = rows.rows {
             for row in rows {
-                if let Some(CqlValue::Text(ks) | CqlValue::Ascii(ks)) =
+                if let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) =
                     row.columns.first().and_then(|v| v.as_ref())
-                    && ks == keyspace
-                    && let Some(CqlValue::Text(t) | CqlValue::Ascii(t)) =
-                        row.columns.get(1).and_then(|v| v.as_ref())
                 {
                     tables.push(t.clone());
                 }

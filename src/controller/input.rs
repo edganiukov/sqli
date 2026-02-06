@@ -33,8 +33,13 @@ impl Controller {
             op,
             super::PendingOperation::ListDatabases { .. } | super::PendingOperation::Connect { .. }
         ) {
-            tab.view_state = ViewState::ConnectionList;
-            tab.name = "New".to_string();
+            if tab.db_client.is_some() {
+                // Already connected — return to database view
+                tab.view_state = ViewState::DatabaseView;
+            } else {
+                tab.view_state = ViewState::ConnectionList;
+                tab.name = "New".to_string();
+            }
             tab.databases.clear();
         }
 
@@ -320,7 +325,7 @@ impl Controller {
 
             let row_index = *row_index;
             let mut new_selected = *selected_field;
-            let scroll = *scroll;
+            let mut new_scroll = *scroll;
 
             match key_code {
                 KeyCode::Esc => {
@@ -348,10 +353,21 @@ impl Controller {
                 _ => {}
             }
 
+            // Update scroll to keep selected field visible
+            // Estimate ~2 lines per field (name + value + spacing)
+            let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
+            let popup_height = (term_height as f32 * 0.8) as usize;
+            let visible_fields = popup_height.saturating_sub(4) / 2; // rough estimate
+            if new_selected < new_scroll {
+                new_scroll = new_selected;
+            } else if new_selected >= new_scroll + visible_fields {
+                new_scroll = new_selected.saturating_sub(visible_fields / 2);
+            }
+
             self.popup_state = PopupState::RecordDetail {
                 row_index,
                 selected_field: new_selected,
-                scroll,
+                scroll: new_scroll,
             };
             return;
         }
@@ -736,12 +752,23 @@ impl Controller {
             self.current_tab_mut().focus = Focus::Sidebar;
 
             // Calculate which table was clicked
-            // Subtract: tab bar (1) + sidebar title (1) + "Tables" header (1) = 3
+            // Layout: tab bar (1) + block title row (1) + "Tables" header (1) = 3 rows before first table
             let table_count = self.current_tab().sidebar.tables.len();
-            let clicked_row = y.saturating_sub(3) as usize;
+            let clicked_visual_row = y.saturating_sub(3) as usize;
 
-            if clicked_row < table_count {
-                self.current_tab_mut().sidebar.selected = clicked_row;
+            // Account for scroll offset in sidebar
+            // The sidebar scrolls when selected item is near bottom
+            let visible_height = term_size.1.saturating_sub(5) as usize; // approximate
+            let selected = self.current_tab().sidebar.selected + 1; // +1 for "Tables" header
+            let scroll_offset = if visible_height > 0 && selected >= visible_height {
+                selected - visible_height + 1
+            } else {
+                0
+            };
+
+            let clicked_index = clicked_visual_row + scroll_offset;
+            if clicked_index < table_count {
+                self.current_tab_mut().sidebar.selected = clicked_index;
                 if is_double_click {
                     self.select_table();
                 }

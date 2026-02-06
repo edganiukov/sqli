@@ -74,8 +74,12 @@ impl Controller {
         if let Some(QueryResult::Select { rows, .. }) = &tab.query_result {
             let max_cursor = rows.len().saturating_sub(1);
             tab.result_cursor = max_cursor;
-            // Scroll so cursor is visible at bottom
-            tab.result_scroll = max_cursor;
+            // Compute visible height to position scroll so last row is at bottom
+            let term_size = crossterm::terminal::size().unwrap_or((80, 24));
+            let main_area_height = term_size.1.saturating_sub(3);
+            let output_height = main_area_height * 65 / 100;
+            let visible_height = output_height.saturating_sub(3).max(1) as usize;
+            tab.result_scroll = max_cursor.saturating_sub(visible_height.saturating_sub(1));
         }
     }
 
@@ -147,8 +151,10 @@ impl Controller {
         let tab = self.current_tab_mut();
         tab.result_selected_col = max_col;
 
-        // Scroll to show the last column
-        let visible_width = 80usize;
+        // Calculate actual visible width from terminal size minus sidebar
+        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+        const SIDEBAR_WIDTH: usize = 40;
+        let visible_width = term_width.saturating_sub(SIDEBAR_WIDTH);
         tab.result_h_scroll = total_width.saturating_sub(visible_width);
     }
 
@@ -194,9 +200,10 @@ impl Controller {
                 .copied()
                 .unwrap_or(0);
 
-        // Auto-scroll to keep selected column visible (assume ~80 char visible width)
-        // The actual visible width will be set during render, but this is a reasonable default
-        let visible_width = 80usize;
+        // Calculate actual visible width from terminal size minus sidebar
+        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+        const SIDEBAR_WIDTH: usize = 40;
+        let visible_width = term_width.saturating_sub(SIDEBAR_WIDTH);
 
         if col_start < tab.result_h_scroll {
             // Column is to the left of viewport

@@ -92,6 +92,7 @@ pub enum PopupState {
     ConfirmDelete {
         index: usize,
         name: String,
+        filter: String, // Preserve filter to restore on cancel
     },
     RecordDetail {
         row_index: usize,
@@ -164,53 +165,62 @@ pub struct DatabaseConn {
 }
 
 impl DatabaseConn {
-    pub fn resolve_password(&self) -> String {
+    /// Resolve the password, either from password_cmd or password field.
+    /// Returns (password, Option<warning_message>) where warning is set if password_cmd failed.
+    pub fn resolve_password(&self) -> (String, Option<String>) {
         if let Some(ref cmd) = self.password_cmd {
             match run_password_command(cmd) {
-                Ok(pwd) => return pwd,
+                Ok(pwd) => return (pwd, None),
                 Err(e) => {
                     crate::debug_log!("Failed to run password_cmd '{}': {}", cmd, e);
+                    let warning = format!("password_cmd failed: {}", e);
+                    // Fall back to password field if available
+                    if let Some(ref pwd) = self.password {
+                        return (pwd.clone(), Some(warning));
+                    }
+                    return (String::new(), Some(warning));
                 }
             }
         }
-        self.password.clone().unwrap_or_default()
+        (self.password.clone().unwrap_or_default(), None)
     }
 
-    pub async fn create_client(&self, database: &str) -> Result<DatabaseClient> {
-        let password = self.resolve_password();
-        match self.db_type {
+    pub async fn create_client(&self, database: &str) -> Result<(DatabaseClient, Option<String>)> {
+        let (password, pwd_warning) = self.resolve_password();
+        let client = match self.db_type {
             DatabaseType::Postgres => {
                 let client =
                     PostgresClient::connect(&self.host, self.port, &self.user, &password, database)
                         .await?;
-                Ok(DatabaseClient::Postgres(client))
+                DatabaseClient::Postgres(client)
             }
             DatabaseType::MySql => {
                 let client =
                     MySqlClient::connect(&self.host, self.port, &self.user, &password, database)
                         .await?;
-                Ok(DatabaseClient::MySql(client))
+                DatabaseClient::MySql(client)
             }
             DatabaseType::Cassandra => {
                 let client = CassandraClient::connect(
                     &self.host, self.port, &self.user, &password, database,
                 )
                 .await?;
-                Ok(DatabaseClient::Cassandra(client))
+                DatabaseClient::Cassandra(client)
             }
             DatabaseType::ClickHouse => {
                 let client = ClickHouseClient::connect(
                     &self.host, self.port, &self.user, &password, database, self.tls,
                 )
                 .await?;
-                Ok(DatabaseClient::ClickHouse(client))
+                DatabaseClient::ClickHouse(client)
             }
             DatabaseType::Sqlite => {
                 let path = self.path.as_deref().unwrap_or(&self.host);
                 let client = crate::sqlite::SqliteClient::connect(path).await?;
-                Ok(DatabaseClient::Sqlite(client))
+                DatabaseClient::Sqlite(client)
             }
-        }
+        };
+        Ok((client, pwd_warning))
     }
 }
 
@@ -453,8 +463,9 @@ impl Controller {
 
         // Track if current tab connected (to reset textarea)
         let mut current_tab_connected = false;
+        let current_tab_idx = self.current_tab;
 
-        for tab in &mut self.tabs {
+        for (tab_idx, tab) in self.tabs.iter_mut().enumerate() {
             let op = match tab.pending_operation.take() {
                 Some(op) => op,
                 None => continue,
@@ -521,7 +532,10 @@ impl Controller {
                                 tab.status_message = None;
                                 tab.view_state = ViewState::DatabaseView;
                                 tab.focus = Focus::Query;
-                                current_tab_connected = true;
+                                // Only reset textarea if THIS is the current tab
+                                if tab_idx == current_tab_idx {
+                                    current_tab_connected = true;
+                                }
                             }
                             Err(e) => {
                                 crate::debug_log!("Connection failed: {}", e);
@@ -551,6 +565,7 @@ impl Controller {
                         tab.result_scroll = 0;
                         tab.result_cursor = 0;
                         tab.result_h_scroll = 0;
+                        tab.result_selected_col = 0;
                         tab.visual_select = None;
                         let timestamp = Local::now().format("%H:%M:%S");
 
