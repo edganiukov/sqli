@@ -118,10 +118,7 @@ pub fn draw_template_list(
         Span::styled("Esc", Style::default().fg(TEXT)),
         Span::styled(" close", dim()),
     ]);
-    frame.render_widget(
-        Paragraph::new(help).alignment(Alignment::Center),
-        help_area,
-    );
+    frame.render_widget(Paragraph::new(help).alignment(Alignment::Center), help_area);
 }
 
 /// Draw save template popup
@@ -290,7 +287,9 @@ pub fn draw_record_detail(
     // Calculate the maximum field name width for alignment
     let max_name_width = columns.iter().map(|c| c.len()).max().unwrap_or(0);
     let left_padding = 2;
-    let value_width = inner.width.saturating_sub(max_name_width as u16 + 4 + left_padding) as usize;
+    let value_width = inner
+        .width
+        .saturating_sub(max_name_width as u16 + 4 + left_padding) as usize;
 
     // Build lines for each field, tracking which line each field starts at
     let mut lines: Vec<Line> = Vec::new();
@@ -417,10 +416,7 @@ pub fn draw_record_detail(
         Span::styled("Esc", Style::default().fg(TEXT)),
         Span::styled(" close", dim()),
     ]);
-    frame.render_widget(
-        Paragraph::new(help).alignment(Alignment::Center),
-        help_area,
-    );
+    frame.render_widget(Paragraph::new(help).alignment(Alignment::Center), help_area);
 }
 
 /// Draw completion popup

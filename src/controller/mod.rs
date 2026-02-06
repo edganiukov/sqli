@@ -413,14 +413,24 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn with_connections(connections: Vec<DatabaseConn>) -> Self {
+    pub fn with_connections(
+        connections: Vec<DatabaseConn>,
+        cli_connection: Option<DatabaseConn>,
+    ) -> Self {
         let runtime = Runtime::new().expect("Failed to create tokio runtime");
         let template_store = TemplateStore::load();
         let clipboard = arboard::Clipboard::new()
             .map_err(|e| crate::debug_log!("Failed to init clipboard: {}", e))
             .ok();
 
-        Self {
+        // If cli_connection is provided, use it as the only connection
+        let (connections, auto_connect) = if let Some(conn) = cli_connection {
+            (vec![conn], true)
+        } else {
+            (connections, false)
+        };
+
+        let mut controller = Self {
             mode: Mode::Normal,
             command_buffer: String::new(),
             query_textarea: TextArea::default(),
@@ -437,7 +447,14 @@ impl Controller {
             pending_ctrl_w: false,
             clipboard,
             last_click: None,
+        };
+
+        // Auto-initiate connection if --connect was provided
+        if auto_connect {
+            controller.initiate_connection();
         }
+
+        controller
     }
 
     pub fn current_tab(&self) -> &Tab {

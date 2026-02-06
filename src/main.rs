@@ -41,6 +41,15 @@ struct Args {
     /// Print debug information during startup
     #[arg(short, long)]
     debug: bool,
+
+    /// Connect using a connection string: <type>://user:pass@host:port/db
+    /// Types: pg (PostgreSQL), my (MySQL), cs (Cassandra/ScyllaDB), ch (ClickHouse), sq (SQLite)
+    /// Examples:
+    ///   pg://postgres:secret@localhost:5432/mydb
+    ///   my://root@localhost:3306
+    ///   sq:///path/to/database.db
+    #[arg(long, value_name = "URL")]
+    connect: Option<String>,
 }
 
 fn main() -> io::Result<()> {
@@ -49,10 +58,23 @@ fn main() -> io::Result<()> {
     // Initialize debug logging before anything else
     debug::init(args.debug);
 
+    // Parse --connect URL if provided
+    let cli_connection = if let Some(ref url) = args.connect {
+        match config::parse_connection_string(url) {
+            Ok(conn) => Some(conn),
+            Err(e) => {
+                eprintln!("Error parsing connection string: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Load config before entering raw mode so errors are visible
     let connections = config::load_config(args.config);
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, connections);
+    let result = run(&mut terminal, connections, cli_connection);
     restore_terminal()?;
     result
 }
@@ -79,8 +101,9 @@ fn restore_terminal() -> io::Result<()> {
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     connections: Vec<controller::DatabaseConn>,
+    cli_connection: Option<controller::DatabaseConn>,
 ) -> io::Result<()> {
-    let controller = Controller::with_connections(connections);
+    let controller = Controller::with_connections(connections, cli_connection);
     let mut app = App::new(controller);
 
     loop {

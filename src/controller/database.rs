@@ -11,7 +11,7 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 impl Controller {
     /// Step 1: User selects a connection - either connect directly (if database configured)
     /// or fetch list of databases for selection
-    pub(super) fn initiate_connection(&mut self) {
+    pub fn initiate_connection(&mut self) {
         let (conn, actual_index) = {
             let tab = self.current_tab();
             let filtered = tab.filtered_connections();

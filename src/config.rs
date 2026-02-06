@@ -158,3 +158,245 @@ fn default_connections() -> Vec<DatabaseConn> {
         group: None,
     }]
 }
+
+/// Parse a connection string URL into a DatabaseConn.
+/// Format: <type>://[user[:pass]@]host[:port][/database]
+/// Types: pg, my, cs, ch, sq
+///
+/// Examples:
+///   pg://postgres:secret@localhost:5432/mydb
+///   my://root@localhost:3306
+///   cs://user:pass@cassandra.example.com/keyspace
+///   ch://default@localhost:8123/default
+///   sq:///path/to/database.db
+///   sq://./local.db
+pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
+    // Parse scheme (type)
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or("Invalid URL: missing '://' separator")?;
+
+    let db_type = match scheme.to_lowercase().as_str() {
+        "pg" | "postgres" | "postgresql" => DatabaseType::Postgres,
+        "my" | "mysql" | "mariadb" => DatabaseType::MySql,
+        "cs" | "cassandra" | "scylla" => DatabaseType::Cassandra,
+        "ch" | "clickhouse" => DatabaseType::ClickHouse,
+        "sq" | "sqlite" | "sqlite3" => DatabaseType::Sqlite,
+        _ => {
+            return Err(format!(
+                "Unknown database type: '{}'. Use pg, my, cs, ch, or sq",
+                scheme
+            ));
+        }
+    };
+
+    // SQLite has special handling - the rest is just a file path
+    if matches!(db_type, DatabaseType::Sqlite) {
+        let path = if rest.is_empty() {
+            return Err("SQLite requires a file path".to_string());
+        } else {
+            rest.to_string()
+        };
+
+        let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+
+        return Ok(DatabaseConn {
+            name,
+            db_type,
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            password: None,
+            password_cmd: None,
+            database: None,
+            path: Some(path),
+            tls: false,
+            readonly: false,
+            group: None,
+        });
+    }
+
+    // Parse user:pass@host:port/database
+    let (auth_host, database) = if let Some(idx) = rest.rfind('/') {
+        let db = &rest[idx + 1..];
+        let db = if db.is_empty() {
+            None
+        } else {
+            Some(db.to_string())
+        };
+        (&rest[..idx], db)
+    } else {
+        (rest, None)
+    };
+
+    // Split auth from host
+    let (user, password, host_port) = if let Some(idx) = auth_host.rfind('@') {
+        let auth = &auth_host[..idx];
+        let host_port = &auth_host[idx + 1..];
+
+        let (user, password) = if let Some(colon_idx) = auth.find(':') {
+            let user = &auth[..colon_idx];
+            let pass = &auth[colon_idx + 1..];
+            (user.to_string(), Some(pass.to_string()))
+        } else {
+            (auth.to_string(), None)
+        };
+
+        (user, password, host_port)
+    } else {
+        // No auth, use defaults
+        let default_user = match db_type {
+            DatabaseType::Postgres => "postgres",
+            DatabaseType::MySql => "root",
+            DatabaseType::ClickHouse => "default",
+            _ => "",
+        };
+        (default_user.to_string(), None, auth_host)
+    };
+
+    // Split host and port
+    let (host, port) = if let Some(colon_idx) = host_port.rfind(':') {
+        let h = &host_port[..colon_idx];
+        let p = &host_port[colon_idx + 1..];
+        let port: u16 = p.parse().map_err(|_| format!("Invalid port: '{}'", p))?;
+        (h.to_string(), port)
+    } else {
+        // Use default port for the database type
+        let default_port = match db_type {
+            DatabaseType::Postgres => 5432,
+            DatabaseType::MySql => 3306,
+            DatabaseType::Cassandra => 9042,
+            DatabaseType::ClickHouse => 8123,
+            DatabaseType::Sqlite => 0,
+        };
+        (host_port.to_string(), default_port)
+    };
+
+    // Use localhost if host is empty
+    let host = if host.is_empty() {
+        "localhost".to_string()
+    } else {
+        host
+    };
+
+    // Generate a connection name
+    let name = if let Some(ref db) = database {
+        format!("{}@{}/{}", user, host, db)
+    } else {
+        format!("{}@{}", user, host)
+    };
+
+    Ok(DatabaseConn {
+        name,
+        db_type,
+        host,
+        port,
+        user,
+        password,
+        password_cmd: None,
+        database,
+        path: None,
+        tls: false,
+        readonly: false,
+        group: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_postgres_full() {
+        let conn = parse_connection_string("pg://myuser:secret@dbhost:5433/mydb").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Postgres));
+        assert_eq!(conn.user, "myuser");
+        assert_eq!(conn.password, Some("secret".to_string()));
+        assert_eq!(conn.host, "dbhost");
+        assert_eq!(conn.port, 5433);
+        assert_eq!(conn.database, Some("mydb".to_string()));
+    }
+
+    #[test]
+    fn test_parse_postgres_no_db() {
+        let conn = parse_connection_string("pg://postgres@localhost").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Postgres));
+        assert_eq!(conn.user, "postgres");
+        assert_eq!(conn.password, None);
+        assert_eq!(conn.host, "localhost");
+        assert_eq!(conn.port, 5432); // default port
+        assert_eq!(conn.database, None);
+    }
+
+    #[test]
+    fn test_parse_postgres_no_auth() {
+        let conn = parse_connection_string("pg://localhost:5432/testdb").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Postgres));
+        assert_eq!(conn.user, "postgres"); // default user
+        assert_eq!(conn.host, "localhost");
+        assert_eq!(conn.port, 5432);
+        assert_eq!(conn.database, Some("testdb".to_string()));
+    }
+
+    #[test]
+    fn test_parse_mysql() {
+        let conn = parse_connection_string("my://root:pass@mysql.local:3307/app").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::MySql));
+        assert_eq!(conn.user, "root");
+        assert_eq!(conn.password, Some("pass".to_string()));
+        assert_eq!(conn.host, "mysql.local");
+        assert_eq!(conn.port, 3307);
+        assert_eq!(conn.database, Some("app".to_string()));
+    }
+
+    #[test]
+    fn test_parse_clickhouse() {
+        let conn = parse_connection_string("ch://default@localhost/default").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
+        assert_eq!(conn.user, "default");
+        assert_eq!(conn.host, "localhost");
+        assert_eq!(conn.port, 8123); // default port
+        assert_eq!(conn.database, Some("default".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cassandra() {
+        let conn = parse_connection_string("cs://cassandra:pass@node1:9043/keyspace").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Cassandra));
+        assert_eq!(conn.user, "cassandra");
+        assert_eq!(conn.password, Some("pass".to_string()));
+        assert_eq!(conn.host, "node1");
+        assert_eq!(conn.port, 9043);
+        assert_eq!(conn.database, Some("keyspace".to_string()));
+    }
+
+    #[test]
+    fn test_parse_sqlite() {
+        let conn = parse_connection_string("sq:///path/to/database.db").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Sqlite));
+        assert_eq!(conn.path, Some("/path/to/database.db".to_string()));
+        assert_eq!(conn.name, "database.db");
+    }
+
+    #[test]
+    fn test_parse_sqlite_relative() {
+        let conn = parse_connection_string("sq://./local.db").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Sqlite));
+        assert_eq!(conn.path, Some("./local.db".to_string()));
+        assert_eq!(conn.name, "local.db");
+    }
+
+    #[test]
+    fn test_parse_invalid_scheme() {
+        let result = parse_connection_string("invalid://localhost");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown database type"));
+    }
+
+    #[test]
+    fn test_parse_missing_separator() {
+        let result = parse_connection_string("pg:localhost");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing '://'"));
+    }
+}

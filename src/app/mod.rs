@@ -469,8 +469,12 @@ impl App {
             _ => None,
         };
         let title = match (tab.visual_select, row_count) {
-            (Some(crate::controller::VisualSelect::Cell { .. }), _) => "Results ── VISUAL".to_string(),
-            (Some(crate::controller::VisualSelect::Line { .. }), _) => "Results ── VISUAL LINE".to_string(),
+            (Some(crate::controller::VisualSelect::Cell { .. }), _) => {
+                "Results ── VISUAL".to_string()
+            }
+            (Some(crate::controller::VisualSelect::Line { .. }), _) => {
+                "Results ── VISUAL LINE".to_string()
+            }
             (None, Some(count)) => format!("Results ({} rows)", count),
             (None, None) => "Results".to_string(),
         };

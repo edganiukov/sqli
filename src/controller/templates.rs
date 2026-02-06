@@ -74,7 +74,11 @@ impl Controller {
                     *editing_connections,
                 );
             }
-            PopupState::ConfirmDelete { index, name, filter } => {
+            PopupState::ConfirmDelete {
+                index,
+                name,
+                filter,
+            } => {
                 self.handle_confirm_delete_keys(key_event, *index, name.clone(), filter.clone());
             }
             PopupState::RecordDetail { .. } => {
