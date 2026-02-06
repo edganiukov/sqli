@@ -96,16 +96,17 @@ sqli --connect "pg://user:pass@localhost:5432/mydb"
 ```
 
 **Supported formats:**
-| Type | URL Format |
-|------|------------|
-| PostgreSQL | `pg://user:pass@host:port/database` |
-| MySQL | `my://user:pass@host:port/database` |
-| Cassandra | `cs://user:pass@host:port/keyspace` |
-| ClickHouse | `ch://user:pass@host:port/database` |
-| SQLite | `sq:///path/to/database.db` |
+| Type | URL | With TLS |
+|------|-----|----------|
+| PostgreSQL | `pg://user:pass@host:port/database` | `pgs://...` |
+| MySQL | `my://user:pass@host:port/database` | `mys://...` |
+| Cassandra | `cs://user:pass@host:port/keyspace` | `css://...` |
+| ClickHouse | `ch://user:pass@host:port/database` | `chs://...` |
+| SQLite | `sq:///path/to/database.db` | — |
 
 - If database is specified → connects directly
 - If database is omitted → shows database list for selection
+- Add `s` suffix to scheme for TLS (`pgs`, `mys`, `css`, `chs`)
 - Default ports are used if not specified (5432, 3306, 9042, 8123)
 - Default users: `postgres` (pg), `root` (my), `default` (ch)
 
@@ -113,6 +114,8 @@ sqli --connect "pg://user:pass@localhost:5432/mydb"
 ```bash
 sqli --connect "pg://postgres@localhost/mydb"      # Direct connect to mydb
 sqli --connect "pg://postgres:secret@localhost"    # Shows database list
+sqli --connect "pgs://admin@db.example.com/prod"   # PostgreSQL with TLS
+sqli --connect "chs://default@ch.example.com:8443" # ClickHouse with TLS
 sqli --connect "my://root@127.0.0.1:3306"          # MySQL, shows DB list
 sqli --connect "sq:///home/user/data.db"           # SQLite file
 sqli --connect "sq://./local.db"                   # SQLite relative path

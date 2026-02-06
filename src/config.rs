@@ -161,10 +161,11 @@ fn default_connections() -> Vec<DatabaseConn> {
 
 /// Parse a connection string URL into a DatabaseConn.
 /// Format: <type>://[user[:pass]@]host[:port][/database]
-/// Types: pg, my, cs, ch, sq
+/// Types: pg, my, cs, ch, sq (add 's' suffix for TLS: pgs, mys, css, chs)
 ///
 /// Examples:
 ///   pg://postgres:secret@localhost:5432/mydb
+///   pgs://postgres@secure.example.com/mydb  (with TLS)
 ///   my://root@localhost:3306
 ///   cs://user:pass@cassandra.example.com/keyspace
 ///   ch://default@localhost:8123/default
@@ -176,21 +177,25 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         .split_once("://")
         .ok_or("Invalid URL: missing '://' separator")?;
 
-    let db_type = match scheme.to_lowercase().as_str() {
-        "pg" | "postgres" | "postgresql" => DatabaseType::Postgres,
-        "my" | "mysql" | "mariadb" => DatabaseType::MySql,
-        "cs" | "cassandra" | "scylla" => DatabaseType::Cassandra,
-        "ch" | "clickhouse" => DatabaseType::ClickHouse,
-        "sq" | "sqlite" | "sqlite3" => DatabaseType::Sqlite,
+    let (db_type, tls) = match scheme.to_lowercase().as_str() {
+        "pg" | "postgres" | "postgresql" => (DatabaseType::Postgres, false),
+        "pgs" | "postgress" | "postgresqls" => (DatabaseType::Postgres, true),
+        "my" | "mysql" | "mariadb" => (DatabaseType::MySql, false),
+        "mys" | "mysqls" | "mariadbs" => (DatabaseType::MySql, true),
+        "cs" | "cassandra" | "scylla" => (DatabaseType::Cassandra, false),
+        "css" | "cassandras" | "scyllas" => (DatabaseType::Cassandra, true),
+        "ch" | "clickhouse" => (DatabaseType::ClickHouse, false),
+        "chs" | "clickhouses" => (DatabaseType::ClickHouse, true),
+        "sq" | "sqlite" | "sqlite3" => (DatabaseType::Sqlite, false),
         _ => {
             return Err(format!(
-                "Unknown database type: '{}'. Use pg, my, cs, ch, or sq",
+                "Unknown database type: '{}'. Use pg, my, cs, ch, or sq (add 's' for TLS)",
                 scheme
             ));
         }
     };
 
-    // SQLite has special handling - the rest is just a file path
+    // SQLite has special handling - the rest is just a file path (no TLS)
     if matches!(db_type, DatabaseType::Sqlite) {
         let path = if rest.is_empty() {
             return Err("SQLite requires a file path".to_string());
@@ -210,7 +215,7 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
             password_cmd: None,
             database: None,
             path: Some(path),
-            tls: false,
+            tls: false, // SQLite doesn't use TLS
             readonly: false,
             group: None,
         });
@@ -296,7 +301,7 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         password_cmd: None,
         database,
         path: None,
-        tls: false,
+        tls,
         readonly: false,
         group: None,
     })
@@ -384,6 +389,43 @@ mod tests {
         assert!(matches!(conn.db_type, DatabaseType::Sqlite));
         assert_eq!(conn.path, Some("./local.db".to_string()));
         assert_eq!(conn.name, "local.db");
+    }
+
+    #[test]
+    fn test_parse_postgres_tls() {
+        let conn = parse_connection_string("pgs://postgres@secure.example.com/mydb").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Postgres));
+        assert!(conn.tls);
+        assert_eq!(conn.host, "secure.example.com");
+        assert_eq!(conn.database, Some("mydb".to_string()));
+    }
+
+    #[test]
+    fn test_parse_mysql_tls() {
+        let conn = parse_connection_string("mys://root@localhost:3306/app").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::MySql));
+        assert!(conn.tls);
+    }
+
+    #[test]
+    fn test_parse_clickhouse_tls() {
+        let conn = parse_connection_string("chs://default@ch.example.com:8443/default").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
+        assert!(conn.tls);
+        assert_eq!(conn.port, 8443);
+    }
+
+    #[test]
+    fn test_parse_cassandra_tls() {
+        let conn = parse_connection_string("css://user@node1/keyspace").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Cassandra));
+        assert!(conn.tls);
+    }
+
+    #[test]
+    fn test_parse_no_tls_by_default() {
+        let conn = parse_connection_string("pg://postgres@localhost").unwrap();
+        assert!(!conn.tls);
     }
 
     #[test]

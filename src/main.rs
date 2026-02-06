@@ -43,11 +43,8 @@ struct Args {
     debug: bool,
 
     /// Connect using a connection string: <type>://user:pass@host:port/db
-    /// Types: pg (PostgreSQL), my (MySQL), cs (Cassandra/ScyllaDB), ch (ClickHouse), sq (SQLite)
-    /// Examples:
-    ///   pg://postgres:secret@localhost:5432/mydb
-    ///   my://root@localhost:3306
-    ///   sq:///path/to/database.db
+    /// Types: pg, my, cs, ch, sq (add 's' for TLS: pgs, mys, css, chs)
+    /// Examples: pg://postgres@localhost/mydb, pgs://user@secure.host/db
     #[arg(long, value_name = "URL")]
     connect: Option<String>,
 }
