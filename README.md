@@ -20,6 +20,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - SQL autocompletion (keywords, tables, columns).
 - Record detail popup for viewing full row data.
 - Mouse support for navigation.
+- Quick connect via URL (`--connect pg://user@host/db`).
 - TOML configuration file with password command support.
 - Connection grouping for organizing databases.
 - Query templates with placeholders.
@@ -85,6 +86,37 @@ A terminal-based SQL client. Supports multiple database backends.
 - `:next/:prev` - switch tabs
 - `:db` - switch database (within current connection)
 - `:system` - toggle system DBs
+
+## Quick Connect
+
+Connect directly using a connection string URL:
+
+```bash
+sqli --connect "pg://user:pass@localhost:5432/mydb"
+```
+
+**Supported formats:**
+| Type | URL Format |
+|------|------------|
+| PostgreSQL | `pg://user:pass@host:port/database` |
+| MySQL | `my://user:pass@host:port/database` |
+| Cassandra | `cs://user:pass@host:port/keyspace` |
+| ClickHouse | `ch://user:pass@host:port/database` |
+| SQLite | `sq:///path/to/database.db` |
+
+- If database is specified → connects directly
+- If database is omitted → shows database list for selection
+- Default ports are used if not specified (5432, 3306, 9042, 8123)
+- Default users: `postgres` (pg), `root` (my), `default` (ch)
+
+**Examples:**
+```bash
+sqli --connect "pg://postgres@localhost/mydb"      # Direct connect to mydb
+sqli --connect "pg://postgres:secret@localhost"    # Shows database list
+sqli --connect "my://root@127.0.0.1:3306"          # MySQL, shows DB list
+sqli --connect "sq:///home/user/data.db"           # SQLite file
+sqli --connect "sq://./local.db"                   # SQLite relative path
+```
 
 ## Configuration
 
