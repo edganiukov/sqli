@@ -9,7 +9,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - **PostgreSQL** - native protocol.
 - **MySQL/MariaDB** - native protocol.
 - **Cassandra/ScyllaDB** - CQL protocol.
-- **ClickHouse** - HTTP API.
+- **ClickHouse** - native protocol (default) or HTTP API.
 - **SQLite** - file-based (bundled).
 
 ## Features
@@ -101,24 +101,27 @@ sqli --connect "pg://user:pass@localhost:5432/mydb"
 | PostgreSQL | `pg://user:pass@host:port/database` | `pgs://...` |
 | MySQL | `my://user:pass@host:port/database` | `mys://...` |
 | Cassandra | `cs://user:pass@host:port/keyspace` | `css://...` |
-| ClickHouse | `ch://user:pass@host:port/database` | `chs://...` |
+| ClickHouse (native) | `ch://user:pass@host:port/database` | `chs://...` |
+| ClickHouse (HTTP) | `chh://user:pass@host:port/database` | `chhs://...` |
 | SQLite | `sq:///path/to/database.db` | — |
 
 - If database is specified → connects directly
 - If database is omitted → shows database list for selection
-- Add `s` suffix to scheme for TLS (`pgs`, `mys`, `css`, `chs`)
-- Default ports are used if not specified (5432, 3306, 9042, 8123)
+- Add `s` suffix to scheme for TLS (`pgs`, `mys`, `css`, `chs`, `chhs`)
+- Default ports are used if not specified (5432, 3306, 9042, 9000, 8123)
 - Default users: `postgres` (pg), `root` (my), `default` (ch)
 
 **Examples:**
 ```bash
-sqli --connect "pg://postgres@localhost/mydb"      # Direct connect to mydb
-sqli --connect "pg://postgres:secret@localhost"    # Shows database list
-sqli --connect "pgs://admin@db.example.com/prod"   # PostgreSQL with TLS
-sqli --connect "chs://default@ch.example.com:8443" # ClickHouse with TLS
-sqli --connect "my://root@127.0.0.1:3306"          # MySQL, shows DB list
-sqli --connect "sq:///home/user/data.db"           # SQLite file
-sqli --connect "sq://./local.db"                   # SQLite relative path
+sqli --connect "pg://postgres@localhost/mydb"       # Direct connect to mydb
+sqli --connect "pg://postgres:secret@localhost"     # Shows database list
+sqli --connect "pgs://admin@db.example.com/prod"    # PostgreSQL with TLS
+sqli --connect "ch://default@localhost:9000/mydb"   # ClickHouse native protocol
+sqli --connect "chs://default@ch.example.com:9440"  # ClickHouse native + TLS
+sqli --connect "chh://default@localhost:8123/mydb"  # ClickHouse HTTP API
+sqli --connect "my://root@127.0.0.1:3306"           # MySQL, shows DB list
+sqli --connect "sq:///home/user/data.db"            # SQLite file
+sqli --connect "sq://./local.db"                    # SQLite relative path
 ```
 
 ## Configuration
@@ -157,14 +160,22 @@ group = "Local"
 [analytics]
 type = "clickhouse"
 host = "clickhouse.local"
+port = 9000
+user = "default"
+group = "Analytics"
+
+[analytics-http]
+type = "clickhouse"
+host = "clickhouse.local"
 port = 8123
 user = "default"
+protocol = "http"
 group = "Analytics"
 
 [analytics-secure]
 type = "clickhouse"
 host = "clickhouse.example.com"
-port = 8443
+port = 9440
 user = "default"
 tls = true
 group = "Analytics"
@@ -198,6 +209,7 @@ group = "Local"
 | `tls` | Enable TLS (default: false) |
 | `readonly` | Read-only mode, blocks non-SELECT queries (default: false) |
 | `group` | Group name for organizing connections (optional) |
+| `protocol` | ClickHouse only: `native` (default) or `http` |
 
 Groups are displayed as tabs in the connection list. Use `h/l` to switch between groups. Connections without a group only appear under "All".
 

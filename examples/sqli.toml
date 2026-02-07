@@ -31,12 +31,23 @@ host = "localhost"
 port = 9042
 group = "NoSQL"
 
+# ClickHouse with Native TCP protocol (default)
 [clickhouse]
+type = "clickhouse"
+host = "localhost"
+port = 9000
+user = "default"
+password = "password"
+group = "Analytics"
+
+# ClickHouse with HTTP API
+[clickhouse-http]
 type = "clickhouse"
 host = "localhost"
 port = 8123
 user = "default"
 password = "password"
+protocol = "http"
 group = "Analytics"
 
 [sqlite]

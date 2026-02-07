@@ -162,6 +162,8 @@ pub struct DatabaseConn {
     pub tls: bool,
     pub readonly: bool,
     pub group: Option<String>,
+    /// Protocol for ClickHouse: "native" (default) or "http"
+    pub protocol: Option<String>,
 }
 
 impl DatabaseConn {
@@ -208,8 +210,12 @@ impl DatabaseConn {
                 DatabaseClient::Cassandra(client)
             }
             DatabaseType::ClickHouse => {
+                let use_http = self
+                    .protocol
+                    .as_ref()
+                    .is_some_and(|p| p.eq_ignore_ascii_case("http"));
                 let client = ClickHouseClient::connect(
-                    &self.host, self.port, &self.user, &password, database, self.tls,
+                    &self.host, self.port, &self.user, &password, database, self.tls, use_http,
                 )
                 .await?;
                 DatabaseClient::ClickHouse(client)

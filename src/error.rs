@@ -88,3 +88,16 @@ impl From<scylla::transport::errors::QueryError> for SqliError {
         SqliError::Query(e.to_string())
     }
 }
+
+impl From<clickhouse_rs::errors::Error> for SqliError {
+    fn from(e: clickhouse_rs::errors::Error) -> Self {
+        use clickhouse_rs::errors::Error;
+        match &e {
+            Error::Driver(_) | Error::Io(_) | Error::Connection(_) => {
+                SqliError::Connection(e.to_string())
+            }
+            Error::Server(server_err) => SqliError::Query(server_err.message.clone()),
+            _ => SqliError::Query(e.to_string()),
+        }
+    }
+}

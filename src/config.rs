@@ -28,6 +28,9 @@ pub struct ConnectionConfig {
     pub readonly: bool,
     #[serde(default)]
     pub group: Option<String>,
+    /// Protocol for ClickHouse: "native" (default) or "http"
+    #[serde(default)]
+    pub protocol: Option<String>,
 }
 
 impl ConnectionConfig {
@@ -54,6 +57,7 @@ impl ConnectionConfig {
             tls: self.tls,
             readonly: self.readonly,
             group: self.group.clone(),
+            protocol: self.protocol.clone(),
         })
     }
 }
@@ -156,19 +160,25 @@ fn default_connections() -> Vec<DatabaseConn> {
         tls: false,
         readonly: false,
         group: None,
+        protocol: None,
     }]
 }
 
 /// Parse a connection string URL into a DatabaseConn.
 /// Format: <type>://[user[:pass]@]host[:port][/database]
-/// Types: pg, my, cs, ch, sq (add 's' suffix for TLS: pgs, mys, css, chs)
+/// Types: pg, my, cs, ch, chh, sq (add 's' suffix for TLS: pgs, mys, css, chs, chhs)
+///
+/// ClickHouse protocols:
+///   ch  - Native TCP protocol (default, port 9000)
+///   chh - HTTP API (port 8123)
 ///
 /// Examples:
 ///   pg://postgres:secret@localhost:5432/mydb
 ///   pgs://postgres@secure.example.com/mydb  (with TLS)
 ///   my://root@localhost:3306
 ///   cs://user:pass@cassandra.example.com/keyspace
-///   ch://default@localhost:8123/default
+///   ch://default@localhost:9000/default     (Native protocol, default)
+///   chh://default@localhost:8123/default    (HTTP API)
 ///   sq:///path/to/database.db
 ///   sq://./local.db
 pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
@@ -177,19 +187,23 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         .split_once("://")
         .ok_or("Invalid URL: missing '://' separator")?;
 
-    let (db_type, tls) = match scheme.to_lowercase().as_str() {
-        "pg" | "postgres" | "postgresql" => (DatabaseType::Postgres, false),
-        "pgs" | "postgress" | "postgresqls" => (DatabaseType::Postgres, true),
-        "my" | "mysql" | "mariadb" => (DatabaseType::MySql, false),
-        "mys" | "mysqls" | "mariadbs" => (DatabaseType::MySql, true),
-        "cs" | "cassandra" | "scylla" => (DatabaseType::Cassandra, false),
-        "css" | "cassandras" | "scyllas" => (DatabaseType::Cassandra, true),
-        "ch" | "clickhouse" => (DatabaseType::ClickHouse, false),
-        "chs" | "clickhouses" => (DatabaseType::ClickHouse, true),
-        "sq" | "sqlite" | "sqlite3" => (DatabaseType::Sqlite, false),
+    // Parse scheme: type, TLS, and protocol (for ClickHouse: native vs http)
+    // ClickHouse: ch/chs = native (default), chh/chhs = HTTP
+    let (db_type, tls, protocol) = match scheme.to_lowercase().as_str() {
+        "pg" | "postgres" | "postgresql" => (DatabaseType::Postgres, false, None),
+        "pgs" | "postgress" | "postgresqls" => (DatabaseType::Postgres, true, None),
+        "my" | "mysql" | "mariadb" => (DatabaseType::MySql, false, None),
+        "mys" | "mysqls" | "mariadbs" => (DatabaseType::MySql, true, None),
+        "cs" | "cassandra" | "scylla" => (DatabaseType::Cassandra, false, None),
+        "css" | "cassandras" | "scyllas" => (DatabaseType::Cassandra, true, None),
+        "ch" | "clickhouse" => (DatabaseType::ClickHouse, false, None),
+        "chs" | "clickhouses" => (DatabaseType::ClickHouse, true, None),
+        "chh" | "clickhouse-http" => (DatabaseType::ClickHouse, false, Some("http".to_string())),
+        "chhs" | "clickhouse-https" => (DatabaseType::ClickHouse, true, Some("http".to_string())),
+        "sq" | "sqlite" | "sqlite3" => (DatabaseType::Sqlite, false, None),
         _ => {
             return Err(format!(
-                "Unknown database type: '{}'. Use pg, my, cs, ch, or sq (add 's' for TLS)",
+                "Unknown database type: '{}'. Use pg, my, cs, ch, chh, or sq (add 's' for TLS)",
                 scheme
             ));
         }
@@ -218,6 +232,7 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
             tls: false, // SQLite doesn't use TLS
             readonly: false,
             group: None,
+            protocol: None,
         });
     }
 
@@ -267,12 +282,13 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         (h.to_string(), port)
     } else {
         // Use default port for the database type
-        let default_port = match db_type {
-            DatabaseType::Postgres => 5432,
-            DatabaseType::MySql => 3306,
-            DatabaseType::Cassandra => 9042,
-            DatabaseType::ClickHouse => 8123,
-            DatabaseType::Sqlite => 0,
+        let default_port = match (&db_type, &protocol) {
+            (DatabaseType::Postgres, _) => 5432,
+            (DatabaseType::MySql, _) => 3306,
+            (DatabaseType::Cassandra, _) => 9042,
+            (DatabaseType::ClickHouse, Some(p)) if p == "http" => 8123,
+            (DatabaseType::ClickHouse, _) => 9000, // native is default
+            (DatabaseType::Sqlite, _) => 0,
         };
         (host_port.to_string(), default_port)
     };
@@ -304,6 +320,7 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         tls,
         readonly: false,
         group: None,
+        protocol,
     })
 }
 
@@ -360,7 +377,7 @@ mod tests {
         assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
         assert_eq!(conn.user, "default");
         assert_eq!(conn.host, "localhost");
-        assert_eq!(conn.port, 8123); // default port
+        assert_eq!(conn.port, 9000); // native port (default)
         assert_eq!(conn.database, Some("default".to_string()));
     }
 
@@ -409,10 +426,10 @@ mod tests {
 
     #[test]
     fn test_parse_clickhouse_tls() {
-        let conn = parse_connection_string("chs://default@ch.example.com:8443/default").unwrap();
+        let conn = parse_connection_string("chs://default@ch.example.com:9440/default").unwrap();
         assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
         assert!(conn.tls);
-        assert_eq!(conn.port, 8443);
+        assert_eq!(conn.port, 9440); // native TLS port
     }
 
     #[test]
@@ -440,5 +457,41 @@ mod tests {
         let result = parse_connection_string("pg:localhost");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("missing '://'"));
+    }
+
+    #[test]
+    fn test_parse_clickhouse_native_default() {
+        let conn = parse_connection_string("ch://default@localhost/default").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
+        assert_eq!(conn.protocol, None); // Native is default (None)
+        assert_eq!(conn.port, 9000); // native port default
+        assert!(!conn.tls);
+    }
+
+    #[test]
+    fn test_parse_clickhouse_native_tls() {
+        let conn = parse_connection_string("chs://default@ch.example.com/default").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
+        assert_eq!(conn.protocol, None); // Native is default
+        assert!(conn.tls);
+        assert_eq!(conn.port, 9000); // native port default
+    }
+
+    #[test]
+    fn test_parse_clickhouse_http() {
+        let conn = parse_connection_string("chh://default@localhost/default").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
+        assert_eq!(conn.protocol, Some("http".to_string()));
+        assert_eq!(conn.port, 8123); // HTTP port default
+        assert!(!conn.tls);
+    }
+
+    #[test]
+    fn test_parse_clickhouse_https() {
+        let conn = parse_connection_string("chhs://default@ch.example.com:8443/default").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::ClickHouse));
+        assert_eq!(conn.protocol, Some("http".to_string()));
+        assert!(conn.tls);
+        assert_eq!(conn.port, 8443);
     }
 }

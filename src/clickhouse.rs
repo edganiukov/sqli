@@ -1,13 +1,30 @@
 use crate::db::QueryResult;
 use crate::error::{Result, SqliError};
+use chrono::{DateTime, NaiveDate};
+use chrono_tz::Tz;
+use clickhouse_rs::types::{Block, Complex, Decimal};
+use clickhouse_rs::{ClientHandle, Pool};
 use reqwest::Client;
 use serde::Deserialize;
 
-pub struct ClickHouseClient {
+/// ClickHouse client supporting both HTTP and native protocols.
+pub enum ClickHouseClient {
+    Http(HttpClient),
+    Native(NativeClient),
+}
+
+/// HTTP API client using reqwest
+pub struct HttpClient {
     client: Client,
     base_url: String,
     user: String,
     password: String,
+    database: String,
+}
+
+/// Native protocol client using clickhouse-rs
+pub struct NativeClient {
+    pool: Pool,
     database: String,
 }
 
@@ -23,6 +40,69 @@ struct ColumnMeta {
 }
 
 impl ClickHouseClient {
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+        database: &str,
+        tls: bool,
+        use_http: bool,
+    ) -> Result<Self> {
+        if use_http {
+            let client = HttpClient::connect(host, port, user, password, database, tls).await?;
+            Ok(ClickHouseClient::Http(client))
+        } else {
+            let client = NativeClient::connect(host, port, user, password, database, tls).await?;
+            Ok(ClickHouseClient::Native(client))
+        }
+    }
+
+    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
+        match self {
+            ClickHouseClient::Http(c) => c.list_databases(include_system).await,
+            ClickHouseClient::Native(c) => c.list_databases(include_system).await,
+        }
+    }
+
+    pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
+        match self {
+            ClickHouseClient::Http(c) => c.list_tables(database).await,
+            ClickHouseClient::Native(c) => c.list_tables(database).await,
+        }
+    }
+
+    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
+        match self {
+            ClickHouseClient::Http(c) => c.execute_query(query).await,
+            ClickHouseClient::Native(c) => c.execute_query(query).await,
+        }
+    }
+
+    pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
+        format!("SELECT * FROM {} LIMIT {}", table, limit)
+    }
+
+    pub fn describe_table_query(&self, table: &str, database: Option<&str>) -> String {
+        match database {
+            Some(db) => format!("DESCRIBE TABLE {}.{}", db, table),
+            None => format!("DESCRIBE TABLE {}", table),
+        }
+    }
+
+    pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
+        match self {
+            ClickHouseClient::Http(c) => c.list_columns(table, database).await,
+            ClickHouseClient::Native(c) => c.list_columns(table, database).await,
+        }
+    }
+}
+
+// ============================================================================
+// HTTP Client Implementation
+// ============================================================================
+
+impl HttpClient {
     pub async fn connect(
         host: &str,
         port: u16,
@@ -152,17 +232,6 @@ impl ClickHouseClient {
         }
     }
 
-    pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
-        format!("SELECT * FROM {} LIMIT {}", table, limit)
-    }
-
-    pub fn describe_table_query(&self, table: &str, database: Option<&str>) -> String {
-        match database {
-            Some(db) => format!("DESCRIBE TABLE {}.{}", db, table),
-            None => format!("DESCRIBE TABLE {}", table),
-        }
-    }
-
     pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
         let query = match database {
             Some(db) => format!(
@@ -189,5 +258,262 @@ impl ClickHouseClient {
             serde_json::Value::String(s) => s.clone(),
             serde_json::Value::Array(_) | serde_json::Value::Object(_) => value.to_string(),
         }
+    }
+}
+
+// ============================================================================
+// Native Protocol Client Implementation
+// ============================================================================
+
+impl NativeClient {
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+        database: &str,
+        _tls: bool, // TLS not yet supported in clickhouse-rs
+    ) -> Result<Self> {
+        // Build connection URL for native protocol
+        // Format: tcp://user:password@host:port/database
+        let url = if password.is_empty() {
+            format!("tcp://{}@{}:{}/{}", user, host, port, database)
+        } else {
+            format!("tcp://{}:{}@{}:{}/{}", user, password, host, port, database)
+        };
+
+        let pool = Pool::new(url);
+
+        // Test connection
+        let mut client = pool.get_handle().await?;
+        client.query("SELECT 1").fetch_all().await?;
+
+        Ok(Self {
+            pool,
+            database: database.to_string(),
+        })
+    }
+
+    async fn get_client(&self) -> Result<ClientHandle> {
+        Ok(self.pool.get_handle().await?)
+    }
+
+    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
+        const SYSTEM_DATABASES: &[&str] = &["system", "INFORMATION_SCHEMA", "information_schema"];
+
+        let mut client = self.get_client().await?;
+        let block = client
+            .query("SELECT name FROM system.databases ORDER BY name")
+            .fetch_all()
+            .await?;
+
+        let databases = Self::extract_string_column(&block, "name")?
+            .into_iter()
+            .filter(|db| include_system || !SYSTEM_DATABASES.contains(&db.as_str()))
+            .collect();
+
+        Ok(databases)
+    }
+
+    pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
+        let mut client = self.get_client().await?;
+        let query = format!(
+            "SELECT name FROM system.tables WHERE database = '{}' ORDER BY name",
+            database.replace('\'', "''")
+        );
+        let block = client.query(&query).fetch_all().await?;
+
+        Self::extract_string_column(&block, "name")
+    }
+
+    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
+        let mut client = self.get_client().await?;
+        let query_upper = query.trim().to_uppercase();
+
+        if query_upper.starts_with("SELECT")
+            || query_upper.starts_with("SHOW")
+            || query_upper.starts_with("DESCRIBE")
+            || query_upper.starts_with("EXPLAIN")
+            || query_upper.starts_with("WITH")
+        {
+            let block = client
+                .query(query.trim().trim_end_matches(';'))
+                .fetch_all()
+                .await?;
+
+            let (columns, rows) = Self::block_to_result(&block)?;
+            Ok(QueryResult::Select { columns, rows })
+        } else {
+            client.execute(query).await?;
+            Ok(QueryResult::Execute { rows_affected: 0 })
+        }
+    }
+
+    pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
+        let mut client = self.get_client().await?;
+        let query = match database {
+            Some(db) => format!(
+                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{}'",
+                db, table
+            ),
+            None => format!(
+                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{}'",
+                self.database, table
+            ),
+        };
+        let block = client.query(&query).fetch_all().await?;
+
+        Self::extract_string_column(&block, "name")
+    }
+
+    /// Extract a single string column from a block
+    fn extract_string_column(block: &Block<Complex>, column_name: &str) -> Result<Vec<String>> {
+        let mut values = Vec::new();
+        let row_count = block.row_count();
+
+        for i in 0..row_count {
+            let value: String = block.get(i, column_name)?;
+            values.push(value);
+        }
+
+        Ok(values)
+    }
+
+    /// Convert a Block to columns and rows for QueryResult
+    fn block_to_result(block: &Block<Complex>) -> Result<(Vec<String>, Vec<Vec<String>>)> {
+        let columns: Vec<String> = block
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
+
+        let row_count = block.row_count();
+        let mut rows = Vec::with_capacity(row_count);
+
+        for row_idx in 0..row_count {
+            let mut row = Vec::with_capacity(columns.len());
+            for col in block.columns() {
+                let value = Self::get_column_value(block, row_idx, col.name(), col.sql_type());
+                row.push(value);
+            }
+            rows.push(row);
+        }
+
+        Ok((columns, rows))
+    }
+
+    /// Get a value from a column, handling different ClickHouse types
+    fn get_column_value(
+        block: &Block<Complex>,
+        row: usize,
+        column: &str,
+        sql_type: clickhouse_rs::types::SqlType,
+    ) -> String {
+        use clickhouse_rs::types::SqlType;
+
+        // Helper macro to try getting a value and converting to string
+        macro_rules! try_get {
+            ($t:ty) => {
+                if let Ok(v) = block.get::<$t, _>(row, column) {
+                    return v.to_string();
+                }
+            };
+            ($t:ty, $fmt:expr) => {
+                if let Ok(v) = block.get::<$t, _>(row, column) {
+                    return $fmt(v);
+                }
+            };
+        }
+
+        macro_rules! try_get_opt {
+            ($t:ty) => {
+                if let Ok(v) = block.get::<Option<$t>, _>(row, column) {
+                    return v
+                        .map(|x| x.to_string())
+                        .unwrap_or_else(|| "NULL".to_string());
+                }
+            };
+            ($t:ty, $fmt:expr) => {
+                if let Ok(v) = block.get::<Option<$t>, _>(row, column) {
+                    return v.map($fmt).unwrap_or_else(|| "NULL".to_string());
+                }
+            };
+        }
+
+        // Format Decimal to string with proper scale
+        let fmt_decimal = |d: Decimal| {
+            let internal: i64 = d.internal();
+            let scale = d.scale() as u32;
+            if scale == 0 {
+                internal.to_string()
+            } else {
+                let divisor = 10i64.pow(scale);
+                let whole = internal / divisor;
+                let frac = (internal % divisor).abs();
+                format!("{}.{:0>width$}", whole, frac, width = scale as usize)
+            }
+        };
+
+        // Format DateTime to ISO format
+        let fmt_datetime = |dt: DateTime<Tz>| dt.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        // Format Date to ISO format
+        let fmt_date = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+
+        // Match on SQL type and try to extract appropriate type
+        match sql_type {
+            SqlType::UInt8 => try_get!(u8),
+            SqlType::UInt16 => try_get!(u16),
+            SqlType::UInt32 => try_get!(u32),
+            SqlType::UInt64 => try_get!(u64),
+            SqlType::Int8 => try_get!(i8),
+            SqlType::Int16 => try_get!(i16),
+            SqlType::Int32 => try_get!(i32),
+            SqlType::Int64 => try_get!(i64),
+            SqlType::Float32 => try_get!(f32),
+            SqlType::Float64 => try_get!(f64),
+            SqlType::String => try_get!(String),
+            SqlType::FixedString(_) => try_get!(String),
+            SqlType::Date => try_get!(NaiveDate, fmt_date),
+            SqlType::DateTime(_) => try_get!(DateTime<Tz>, fmt_datetime),
+            SqlType::Decimal(_, _) => try_get!(Decimal, fmt_decimal),
+            SqlType::Uuid => try_get!(String), // UUID comes as string
+            SqlType::Ipv4 => try_get!(String),
+            SqlType::Ipv6 => try_get!(String),
+            SqlType::Nullable(inner) => match *inner {
+                SqlType::UInt8 => try_get_opt!(u8),
+                SqlType::UInt16 => try_get_opt!(u16),
+                SqlType::UInt32 => try_get_opt!(u32),
+                SqlType::UInt64 => try_get_opt!(u64),
+                SqlType::Int8 => try_get_opt!(i8),
+                SqlType::Int16 => try_get_opt!(i16),
+                SqlType::Int32 => try_get_opt!(i32),
+                SqlType::Int64 => try_get_opt!(i64),
+                SqlType::Float32 => try_get_opt!(f32),
+                SqlType::Float64 => try_get_opt!(f64),
+                SqlType::String => try_get_opt!(String),
+                SqlType::FixedString(_) => try_get_opt!(String),
+                SqlType::Date => try_get_opt!(NaiveDate, fmt_date),
+                SqlType::DateTime(_) => try_get_opt!(DateTime<Tz>, fmt_datetime),
+                SqlType::Decimal(_, _) => try_get_opt!(Decimal, fmt_decimal),
+                SqlType::Uuid => try_get_opt!(String),
+                SqlType::Ipv4 => try_get_opt!(String),
+                SqlType::Ipv6 => try_get_opt!(String),
+                _ => {}
+            },
+            _ => {}
+        }
+
+        // Fallback: try common types in order of likelihood
+        try_get!(String);
+        try_get!(DateTime<Tz>, fmt_datetime);
+        try_get!(NaiveDate, fmt_date);
+        try_get!(Decimal, fmt_decimal);
+        try_get!(i64);
+        try_get!(u64);
+        try_get!(f64);
+
+        // Ultimate fallback
+        "<unsupported>".to_string()
     }
 }
