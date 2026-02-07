@@ -1,5 +1,6 @@
 use crate::db::QueryResult;
 use crate::error::{Result, SqliError};
+use crate::format as fmt;
 use chrono::{DateTime, NaiveDate};
 use chrono_tz::Tz;
 use clickhouse_rs::types::{Block, Complex, Decimal};
@@ -428,36 +429,19 @@ impl NativeClient {
         macro_rules! try_get_opt {
             ($t:ty) => {
                 if let Ok(v) = block.get::<Option<$t>, _>(row, column) {
-                    return v
-                        .map(|x| x.to_string())
-                        .unwrap_or_else(|| "NULL".to_string());
+                    return fmt::null_or(v);
                 }
             };
             ($t:ty, $fmt:expr) => {
                 if let Ok(v) = block.get::<Option<$t>, _>(row, column) {
-                    return v.map($fmt).unwrap_or_else(|| "NULL".to_string());
+                    return fmt::null_or_else(v, $fmt);
                 }
             };
         }
 
-        // Format Decimal to string with proper scale
-        let fmt_decimal = |d: Decimal| {
-            let internal: i64 = d.internal();
-            let scale = d.scale() as u32;
-            if scale == 0 {
-                internal.to_string()
-            } else {
-                let divisor = 10i64.pow(scale);
-                let whole = internal / divisor;
-                let frac = (internal % divisor).abs();
-                format!("{}.{:0>width$}", whole, frac, width = scale as usize)
-            }
-        };
-
-        // Format DateTime to ISO format
+        // Formatters using shared format module
+        let fmt_decimal = |d: Decimal| fmt::decimal(d.internal(), d.scale() as u32);
         let fmt_datetime = |dt: DateTime<Tz>| dt.format("%Y-%m-%d %H:%M:%S").to_string();
-
-        // Format Date to ISO format
         let fmt_date = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
 
         // Match on SQL type and try to extract appropriate type
@@ -472,14 +456,11 @@ impl NativeClient {
             SqlType::Int64 => try_get!(i64),
             SqlType::Float32 => try_get!(f32),
             SqlType::Float64 => try_get!(f64),
-            SqlType::String => try_get!(String),
-            SqlType::FixedString(_) => try_get!(String),
+            SqlType::String | SqlType::FixedString(_) => try_get!(String),
             SqlType::Date => try_get!(NaiveDate, fmt_date),
             SqlType::DateTime(_) => try_get!(DateTime<Tz>, fmt_datetime),
             SqlType::Decimal(_, _) => try_get!(Decimal, fmt_decimal),
-            SqlType::Uuid => try_get!(String), // UUID comes as string
-            SqlType::Ipv4 => try_get!(String),
-            SqlType::Ipv6 => try_get!(String),
+            SqlType::Uuid | SqlType::Ipv4 | SqlType::Ipv6 => try_get!(String),
             SqlType::Nullable(inner) => match *inner {
                 SqlType::UInt8 => try_get_opt!(u8),
                 SqlType::UInt16 => try_get_opt!(u16),
@@ -491,14 +472,11 @@ impl NativeClient {
                 SqlType::Int64 => try_get_opt!(i64),
                 SqlType::Float32 => try_get_opt!(f32),
                 SqlType::Float64 => try_get_opt!(f64),
-                SqlType::String => try_get_opt!(String),
-                SqlType::FixedString(_) => try_get_opt!(String),
+                SqlType::String | SqlType::FixedString(_) => try_get_opt!(String),
                 SqlType::Date => try_get_opt!(NaiveDate, fmt_date),
                 SqlType::DateTime(_) => try_get_opt!(DateTime<Tz>, fmt_datetime),
                 SqlType::Decimal(_, _) => try_get_opt!(Decimal, fmt_decimal),
-                SqlType::Uuid => try_get_opt!(String),
-                SqlType::Ipv4 => try_get_opt!(String),
-                SqlType::Ipv6 => try_get_opt!(String),
+                SqlType::Uuid | SqlType::Ipv4 | SqlType::Ipv6 => try_get_opt!(String),
                 _ => {}
             },
             _ => {}

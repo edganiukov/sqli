@@ -1,5 +1,6 @@
 use crate::db::QueryResult;
 use crate::error::Result;
+use crate::format as fmt;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde_json::Value as JsonValue;
 use tokio_postgres::types::Type;
@@ -138,85 +139,54 @@ impl PostgresClient {
     fn get_column_value(row: &Row, idx: usize) -> String {
         let col_type = row.columns()[idx].type_();
 
+        // Helper macro to reduce boilerplate for simple types
+        macro_rules! get_value {
+            ($t:ty) => {
+                row.try_get::<_, Option<$t>>(idx).map(fmt::null_or)
+            };
+            ($t:ty, $f:expr) => {
+                row.try_get::<_, Option<$t>>(idx)
+                    .map(|v| fmt::null_or_else(v, $f))
+            };
+        }
+
         let result: std::result::Result<String, _> = match *col_type {
-            Type::BOOL => row.try_get::<_, Option<bool>>(idx).map(|v| {
-                v.map(|b| b.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::INT2 => row.try_get::<_, Option<i16>>(idx).map(|v| {
-                v.map(|n| n.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::INT4 | Type::OID => row.try_get::<_, Option<i32>>(idx).map(|v| {
-                v.map(|n| n.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::INT8 => row.try_get::<_, Option<i64>>(idx).map(|v| {
-                v.map(|n| n.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::FLOAT4 => row.try_get::<_, Option<f32>>(idx).map(|v| {
-                v.map(|n| n.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::FLOAT8 => row.try_get::<_, Option<f64>>(idx).map(|v| {
-                v.map(|n| n.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::NUMERIC => row
-                .try_get::<_, Option<rust_decimal::Decimal>>(idx)
-                .map(|v| {
-                    v.map(|n| n.to_string())
-                        .unwrap_or_else(|| "NULL".to_string())
-                }),
+            Type::BOOL => get_value!(bool),
+            Type::INT2 => get_value!(i16),
+            Type::INT4 | Type::OID => get_value!(i32),
+            Type::INT8 => get_value!(i64),
+            Type::FLOAT4 => get_value!(f32),
+            Type::FLOAT8 => get_value!(f64),
+            Type::NUMERIC => get_value!(rust_decimal::Decimal),
             Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN => row
                 .try_get::<_, Option<String>>(idx)
                 .map(|v| v.unwrap_or_else(|| "NULL".to_string())),
-            Type::JSON | Type::JSONB => row.try_get::<_, Option<JsonValue>>(idx).map(|v| {
-                v.map(|j| j.to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::TIMESTAMP => row.try_get::<_, Option<NaiveDateTime>>(idx).map(|v| {
-                v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::TIMESTAMPTZ => row.try_get::<_, Option<DateTime<Utc>>>(idx).map(|v| {
-                v.map(|t| t.format("%Y-%m-%d %H:%M:%S%.3f %Z").to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::DATE => row.try_get::<_, Option<NaiveDate>>(idx).map(|v| {
-                v.map(|d| d.format("%Y-%m-%d").to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::TIME => row.try_get::<_, Option<NaiveTime>>(idx).map(|v| {
-                v.map(|t| t.format("%H:%M:%S%.3f").to_string())
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::BYTEA => row.try_get::<_, Option<Vec<u8>>>(idx).map(|v| {
-                v.map(|bytes| {
-                    if bytes.len() <= 32 {
-                        format!("\\x{}", hex::encode(&bytes))
-                    } else {
-                        format!("<bytea: {} bytes>", bytes.len())
-                    }
-                })
-                .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::TEXT_ARRAY => row.try_get::<_, Option<Vec<String>>>(idx).map(|v| {
-                v.map(|arr| format!("{{{}}}", arr.join(",")))
-                    .unwrap_or_else(|| "NULL".to_string())
-            }),
-            Type::INT4_ARRAY => row.try_get::<_, Option<Vec<i32>>>(idx).map(|v| {
-                v.map(|arr| {
-                    format!(
-                        "{{{}}}",
-                        arr.iter()
-                            .map(|n| n.to_string())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    )
-                })
-                .unwrap_or_else(|| "NULL".to_string())
+            Type::JSON | Type::JSONB => get_value!(JsonValue),
+            Type::TIMESTAMP => get_value!(NaiveDateTime, |t: NaiveDateTime| t
+                .format("%Y-%m-%d %H:%M:%S%.3f")
+                .to_string()),
+            Type::TIMESTAMPTZ => get_value!(DateTime<Utc>, |t: DateTime<Utc>| t
+                .format("%Y-%m-%d %H:%M:%S%.3f %Z")
+                .to_string()),
+            Type::DATE => get_value!(NaiveDate, |d: NaiveDate| d.format("%Y-%m-%d").to_string()),
+            Type::TIME => get_value!(NaiveTime, |t: NaiveTime| t
+                .format("%H:%M:%S%.3f")
+                .to_string()),
+            Type::BYTEA => get_value!(Vec<u8>, |b: Vec<u8>| fmt::bytes(&b, 32)),
+            Type::TEXT_ARRAY => {
+                get_value!(Vec<String>, |arr: Vec<String>| format!(
+                    "{{{}}}",
+                    arr.join(",")
+                ))
+            }
+            Type::INT4_ARRAY => get_value!(Vec<i32>, |arr: Vec<i32>| {
+                format!(
+                    "{{{}}}",
+                    arr.iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
             }),
             _ => {
                 // For unsupported types, try string first, then show type name

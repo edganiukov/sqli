@@ -1,5 +1,6 @@
 use crate::db::QueryResult;
 use crate::error::Result;
+use crate::format as fmt;
 use chrono::{DateTime, NaiveDate, Utc};
 use scylla::frame::response::result::CqlValue;
 use scylla::frame::value::{CqlDate, CqlDecimal, CqlTime, CqlTimestamp};
@@ -181,26 +182,25 @@ impl CassandraClient {
         match value {
             None => "NULL".to_string(),
             Some(v) => match v {
-                CqlValue::Ascii(s) => s.clone(),
-                CqlValue::Text(s) => s.clone(),
+                CqlValue::Ascii(s) | CqlValue::Text(s) => s.clone(),
                 CqlValue::Int(i) => i.to_string(),
                 CqlValue::BigInt(i) => i.to_string(),
                 CqlValue::Float(f) => f.to_string(),
                 CqlValue::Double(d) => d.to_string(),
                 CqlValue::Boolean(b) => b.to_string(),
                 CqlValue::Uuid(u) => u.to_string(),
-                CqlValue::Timestamp(t) => Self::format_timestamp(t),
-                CqlValue::Blob(b) => format!("<blob {} bytes>", b.len()),
-                CqlValue::List(l) => format!("[{} items]", l.len()),
-                CqlValue::Map(m) => format!("{{map {} entries}}", m.len()),
-                CqlValue::Set(s) => format!("{{set {} items}}", s.len()),
                 CqlValue::SmallInt(i) => i.to_string(),
                 CqlValue::TinyInt(i) => i.to_string(),
                 CqlValue::Inet(addr) => addr.to_string(),
+                CqlValue::Varint(v) => format!("{:?}", v),
+                CqlValue::Timestamp(t) => Self::format_timestamp(t),
                 CqlValue::Date(d) => Self::format_date(d),
                 CqlValue::Time(t) => Self::format_time(t),
-                CqlValue::Varint(v) => format!("{:?}", v),
                 CqlValue::Decimal(d) => Self::format_decimal(d),
+                CqlValue::Blob(b) => fmt::collection("blob", b.len()),
+                CqlValue::List(l) => fmt::collection("list", l.len()),
+                CqlValue::Map(m) => fmt::collection("map", m.len()),
+                CqlValue::Set(s) => fmt::collection("set", s.len()),
                 _ => format!("{:?}", v),
             },
         }
@@ -210,60 +210,30 @@ impl CassandraClient {
         let millis = t.0;
         let secs = millis / 1000;
         let nsecs = ((millis % 1000) * 1_000_000) as u32;
-        match DateTime::<Utc>::from_timestamp(secs, nsecs) {
-            Some(dt) => dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
-            None => format!("{}", millis),
-        }
+        DateTime::<Utc>::from_timestamp(secs, nsecs)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
+            .unwrap_or_else(|| millis.to_string())
     }
 
     fn format_date(d: &CqlDate) -> String {
         let days = d.0 as i64 - (1 << 31);
-        match NaiveDate::from_num_days_from_ce_opt(days as i32 + 719163) {
-            Some(date) => date.format("%Y-%m-%d").to_string(),
-            None => format!("{}", d.0),
-        }
+        NaiveDate::from_num_days_from_ce_opt(days as i32 + 719163)
+            .map(|date| date.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| d.0.to_string())
     }
 
     fn format_time(t: &CqlTime) -> String {
         let nanos = t.0;
-        let secs = nanos / 1_000_000_000;
-        let hours = secs / 3600;
-        let mins = (secs % 3600) / 60;
-        let secs = secs % 60;
-        let millis = (nanos % 1_000_000_000) / 1_000_000;
-        format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
+        let total_secs = nanos / 1_000_000_000;
+        let hours = (total_secs / 3600) as u32;
+        let mins = ((total_secs % 3600) / 60) as u32;
+        let secs = (total_secs % 60) as u32;
+        let millis = ((nanos % 1_000_000_000) / 1_000_000) as u32;
+        fmt::time_millis(hours, mins, secs, millis)
     }
 
     fn format_decimal(d: &CqlDecimal) -> String {
-        use num_bigint::BigInt;
-        let (int_val, scale) = d.as_signed_be_bytes_slice_and_exponent();
-        let bigint = BigInt::from_signed_bytes_be(int_val);
-        let scale = scale as usize;
-
-        let s = bigint.to_string();
-        let negative = s.starts_with('-');
-        let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-
-        if scale == 0 {
-            if negative {
-                format!("-{}", digits)
-            } else {
-                digits
-            }
-        } else if scale >= digits.len() {
-            let zeros = "0".repeat(scale - digits.len());
-            if negative {
-                format!("-0.{}{}", zeros, digits)
-            } else {
-                format!("0.{}{}", zeros, digits)
-            }
-        } else {
-            let (int_part, frac_part) = digits.split_at(digits.len() - scale);
-            if negative {
-                format!("-{}.{}", int_part, frac_part)
-            } else {
-                format!("{}.{}", int_part, frac_part)
-            }
-        }
+        let (bytes, scale) = d.as_signed_be_bytes_slice_and_exponent();
+        fmt::decimal_from_bytes(bytes, scale)
     }
 }

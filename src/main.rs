@@ -8,6 +8,7 @@ mod db;
 mod debug;
 mod editor;
 mod error;
+mod format;
 mod mysql;
 mod postgres;
 mod sqlite;

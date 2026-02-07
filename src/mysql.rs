@@ -1,5 +1,6 @@
 use crate::db::QueryResult;
 use crate::error::{Result, SqliError};
+use crate::format as fmt;
 use mysql_async::prelude::*;
 use mysql_async::{Opts, OptsBuilder, Pool, Value};
 
@@ -120,26 +121,26 @@ impl MySqlClient {
 
     fn format_value(value: Option<Value>) -> String {
         match value {
-            None => "NULL".to_string(),
-            Some(Value::NULL) => "NULL".to_string(),
+            None | Some(Value::NULL) => "NULL".to_string(),
             Some(Value::Bytes(b)) => String::from_utf8_lossy(&b).to_string(),
             Some(Value::Int(i)) => i.to_string(),
             Some(Value::UInt(u)) => u.to_string(),
             Some(Value::Float(f)) => f.to_string(),
             Some(Value::Double(d)) => d.to_string(),
-            Some(Value::Date(y, m, d, h, min, s, us)) => {
-                if h == 0 && min == 0 && s == 0 && us == 0 {
-                    format!("{:04}-{:02}-{:02}", y, m, d)
+            Some(Value::Date(y, m, d, h, min, s, _us)) => {
+                if h == 0 && min == 0 && s == 0 {
+                    fmt::date(y as i32, m as u32, d as u32)
                 } else {
-                    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, h, min, s)
+                    fmt::datetime(y as i32, m as u32, d as u32, h as u32, min as u32, s as u32)
                 }
             }
             Some(Value::Time(neg, d, h, m, s, us)) => {
                 let sign = if neg { "-" } else { "" };
+                let total_hours = d * 24 + h as u32;
                 if us == 0 {
-                    format!("{}{}:{:02}:{:02}", sign, d * 24 + h as u32, m, s)
+                    format!("{}{}:{:02}:{:02}", sign, total_hours, m, s)
                 } else {
-                    format!("{}{}:{:02}:{:02}.{:06}", sign, d * 24 + h as u32, m, s, us)
+                    format!("{}{}:{:02}:{:02}.{:06}", sign, total_hours, m, s, us)
                 }
             }
         }
