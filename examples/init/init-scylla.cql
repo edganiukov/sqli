@@ -33,6 +33,11 @@ INSERT INTO users (id, username, email, created_at) VALUES
 INSERT INTO users (id, username, email, created_at) VALUES
     (uuid(), 'charlie', 'charlie@example.com', toTimestamp(now()));
 
+INSERT INTO orders (user_id, total, status) VALUES
+    (1, 34.98, 'completed'),
+    (2, 9.99, 'pending'),
+    (1, 24.99, 'shipped');
+
 INSERT INTO products (id, name, price, stock) VALUES
     (uuid(), 'Widget', 9.99, 100);
 INSERT INTO products (id, name, price, stock) VALUES
