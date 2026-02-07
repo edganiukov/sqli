@@ -350,6 +350,17 @@ impl Controller {
                 KeyCode::PageUp => {
                     new_selected = new_selected.saturating_sub(10);
                 }
+                KeyCode::Char('y') => {
+                    // Copy the selected field value to clipboard
+                    if let Some(crate::db::QueryResult::Select { rows, .. }) =
+                        &self.current_tab().query_result
+                        && let Some(row) = rows.get(row_index)
+                    {
+                        let value = row.get(*selected_field).cloned().unwrap_or_default();
+                        self.copy_to_clipboard(&value, 1, "value");
+                    }
+                    return;
+                }
                 _ => {}
             }
 

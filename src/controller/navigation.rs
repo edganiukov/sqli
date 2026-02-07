@@ -292,7 +292,7 @@ impl Controller {
     }
 
     /// Copy text to the system clipboard and update status message
-    fn copy_to_clipboard(&mut self, text: &str, count: usize, unit: &str) {
+    pub(super) fn copy_to_clipboard(&mut self, text: &str, count: usize, unit: &str) {
         match &mut self.clipboard {
             Some(cb) => match cb.set_text(text) {
                 Ok(()) => {
