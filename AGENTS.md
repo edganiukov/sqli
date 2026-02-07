@@ -1,6 +1,6 @@
 # AGENTS.md - AI Coding Agent Guidelines
 
-This document provides guidelines for AI coding agents working on the `sqli` codebase - a terminal-based SQL client supporting PostgreSQL, MySQL, Cassandra/ScyllaDB, and ClickHouse.
+This document provides guidelines for AI coding agents working on the `sqli` codebase - a terminal-based SQL client supporting PostgreSQL, MySQL, Cassandra/ScyllaDB, ClickHouse, and SQLite.
 
 ## Build, Lint, and Test Commands
 
@@ -45,22 +45,31 @@ cargo clippy --fix        # Auto-fix lint warnings
 ```
 src/
 ├── main.rs           # Entry point, terminal setup, event loop
-├── app.rs            # UI rendering (ratatui widgets)
+├── app/              # UI rendering (ratatui widgets)
+│   ├── mod.rs        # Main App struct and draw logic
+│   ├── popups.rs     # Popup rendering (templates, record detail)
+│   ├── theme.rs      # Color scheme definitions
+│   └── widgets.rs    # Reusable widget components
 ├── config.rs         # TOML config loading
 ├── controller/       # Business logic
 │   ├── mod.rs        # Core types (Mode, Focus, ViewState, Tab, Controller)
 │   ├── input.rs      # Keyboard input handling
-│   ├── navigation.rs # Focus/tab navigation
+│   ├── navigation.rs # Focus/tab navigation, clipboard operations
 │   ├── database.rs   # DB operations (connect, query, refresh)
+│   ├── completion.rs # SQL autocompletion logic
 │   └── templates.rs  # Template popup handling
 ├── db.rs             # DatabaseClient enum (dispatch layer)
 ├── error.rs          # Error types (SqliError, Result alias)
 ├── editor.rs         # External editor integration
 ├── templates.rs      # Template storage and parsing
+├── completion.rs     # Completion types and suggestions
+├── format.rs         # Output formatting utilities
+├── debug.rs          # Debug logging utilities
 ├── postgres.rs       # PostgreSQL client
 ├── mysql.rs          # MySQL client
 ├── cassandra.rs      # Cassandra/ScyllaDB client
-└── clickhouse.rs     # ClickHouse client (HTTP API)
+├── clickhouse.rs     # ClickHouse client (HTTP API)
+└── sqlite.rs         # SQLite client
 ```
 
 ## Code Style Guidelines
@@ -76,37 +85,6 @@ Order imports in this sequence, separated by blank lines:
 - 4-space indentation
 - Keep lines under ~100 characters when practical
 - Use trailing commas in multi-line constructs
-
-### Type Definitions
-
-**Enums for State Machines:**
-```rust
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Focus {
-    Sidebar,
-    Query,
-    Output,
-}
-```
-
-**Enum Dispatch over Trait Objects:**
-```rust
-pub enum DatabaseClient {
-    Postgres(PostgresClient),
-    MySql(MySqlClient),
-    // ...
-}
-
-impl DatabaseClient {
-    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
-        match self {
-            DatabaseClient::Postgres(c) => c.execute_query(query).await,
-            DatabaseClient::MySql(c) => c.execute_query(query).await,
-            // ...
-        }
-    }
-}
-```
 
 ### Naming Conventions
 - `snake_case`: functions, variables, modules
@@ -146,23 +124,7 @@ match key_code {
 }
 ```
 
-### Database Client Pattern
-Each database module follows this interface:
-```rust
-impl PostgresClient {
-    pub async fn connect(...) -> Result<Self>
-    pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>>
-    pub async fn list_tables(&self, schema: &str) -> Result<Vec<String>>
-    pub async fn execute_query(&self, query: &str) -> Result<QueryResult>
-    pub fn select_table_query(&self, table: &str, limit: usize) -> String
-    pub fn describe_table_query(&self, table: &str, schema: Option<&str>) -> String
-}
-```
-
 ## Key Design Decisions
-
-1. **No trait objects for DB clients** - Uses enum dispatch for compile-time polymorphism
-2. **Sync TUI, async DB** - TUI runs synchronously; DB ops bridged via `block_on()`
-3. **Controller pattern** - `Controller` owns all state; `App` handles rendering only
-4. **Module-per-backend** - Each database has its own module with consistent interface
-5. **TOML config** - Connections defined in `~/.config/sqli/config.toml`
+1. **Controller pattern** - `Controller` owns all state; `App` handles rendering only
+2. **Module-per-backend** - Each database has its own module with consistent interface
+3. **TOML config** - Connections defined in `~/.config/sqli/config.toml`
