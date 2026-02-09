@@ -429,7 +429,7 @@ pub fn draw_completion(
     let area = frame.area();
 
     // Calculate popup position based on cursor
-    let (cursor_row, cursor_col) = controller.query_textarea.cursor();
+    let (cursor_row, cursor_col) = controller.current_tab().query_textarea.cursor();
 
     // Query panel starts after sidebar + tab bar (1 row)
     // Layout: sidebar is 40 cols (Constraint::Length(40) in draw_database_view)

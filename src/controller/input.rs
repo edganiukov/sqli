@@ -237,7 +237,7 @@ impl Controller {
                     return;
                 }
                 KeyCode::Char('r') => {
-                    self.query_textarea.redo();
+                    self.current_tab_mut().query_textarea.redo();
                     return;
                 }
                 KeyCode::Char('o') => {
@@ -257,11 +257,11 @@ impl Controller {
                     return;
                 }
                 KeyCode::Char('k') => {
-                    self.query_textarea.delete_line_by_end();
+                    self.current_tab_mut().query_textarea.delete_line_by_end();
                     return;
                 }
                 KeyCode::Char('z') => {
-                    self.query_textarea.undo();
+                    self.current_tab_mut().query_textarea.undo();
                     return;
                 }
                 KeyCode::Char(';') => {
@@ -271,11 +271,11 @@ impl Controller {
                 }
 
                 KeyCode::Left => {
-                    self.query_textarea.move_cursor(CursorMove::WordBack);
+                    self.current_tab_mut().query_textarea.move_cursor(CursorMove::WordBack);
                     return;
                 }
                 KeyCode::Right => {
-                    self.query_textarea.move_cursor(CursorMove::WordForward);
+                    self.current_tab_mut().query_textarea.move_cursor(CursorMove::WordForward);
                     return;
                 }
                 _ => {
@@ -299,7 +299,7 @@ impl Controller {
         }
 
         // All other keys go to textarea
-        self.query_textarea.input(key_event);
+        self.current_tab_mut().query_textarea.input(key_event);
     }
 
     fn handle_output_keys(&mut self, key_code: KeyCode) {
@@ -473,7 +473,7 @@ impl Controller {
     pub fn handle_paste(&mut self, text: String) {
         let view_state = self.current_tab().view_state;
         if view_state == ViewState::DatabaseView && self.current_tab().focus == Focus::Query {
-            self.query_textarea.insert_str(&text);
+            self.current_tab_mut().query_textarea.insert_str(&text);
         }
     }
 

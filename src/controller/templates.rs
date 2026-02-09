@@ -36,7 +36,7 @@ impl Controller {
     }
 
     pub(super) fn open_save_template_popup(&mut self) {
-        let query: String = self.query_textarea.lines().join("\n");
+        let query: String = self.current_tab().query_textarea.lines().join("\n");
         if query.trim().is_empty() {
             self.current_tab_mut().status_message =
                 Some("Cannot save empty query as template".to_string());
@@ -325,7 +325,7 @@ impl Controller {
     }
 
     fn save_current_template(&mut self, name: String, scope: TemplateScope) {
-        let query: String = self.query_textarea.lines().join("\n");
+        let query: String = self.current_tab().query_textarea.lines().join("\n");
 
         let template = Template {
             name: name.clone(),
@@ -348,24 +348,25 @@ impl Controller {
         };
 
         // Insert query into text area
-        self.query_textarea.select_all();
-        self.query_textarea.cut();
-        self.query_textarea.insert_str(&template.query);
+        let tab = self.current_tab_mut();
+        tab.query_textarea.select_all();
+        tab.query_textarea.cut();
+        tab.query_textarea.insert_str(&template.query);
 
         // Position cursor at end of first <placeholder>
         if let Some((line, col, len)) = crate::templates::find_placeholder(&template.query) {
             // Move to start
-            self.query_textarea.move_cursor(CursorMove::Top);
-            self.query_textarea.move_cursor(CursorMove::Head);
+            tab.query_textarea.move_cursor(CursorMove::Top);
+            tab.query_textarea.move_cursor(CursorMove::Head);
 
             // Move to target line
             for _ in 0..line {
-                self.query_textarea.move_cursor(CursorMove::Down);
+                tab.query_textarea.move_cursor(CursorMove::Down);
             }
 
             // Move to end of placeholder (col + len)
             for _ in 0..(col + len) {
-                self.query_textarea.move_cursor(CursorMove::Forward);
+                tab.query_textarea.move_cursor(CursorMove::Forward);
             }
         }
 
@@ -375,15 +376,15 @@ impl Controller {
     }
 
     pub(super) fn edit_query_in_editor(&mut self) {
-        let current_query: String = self.query_textarea.lines().join("\n");
+        let current_query: String = self.current_tab().query_textarea.lines().join("\n");
 
         match crate::editor::edit_in_external_editor(&current_query, "sql") {
             Ok(edited) => {
-                self.query_textarea.select_all();
-                self.query_textarea.cut();
-                self.query_textarea.insert_str(edited.trim_end());
-                self.current_tab_mut().status_message =
-                    Some("Query updated from editor".to_string());
+                let tab = self.current_tab_mut();
+                tab.query_textarea.select_all();
+                tab.query_textarea.cut();
+                tab.query_textarea.insert_str(edited.trim_end());
+                tab.status_message = Some("Query updated from editor".to_string());
             }
             Err(e) => {
                 self.current_tab_mut().status_message = Some(format!("Editor error: {}", e));

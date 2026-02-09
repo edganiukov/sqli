@@ -257,6 +257,7 @@ pub struct Tab {
     pub database_selected: usize,         // selected index in database list
     pub sidebar: SidebarState,
     pub column_cache: std::collections::HashMap<String, Vec<String>>, // table -> columns
+    pub query_textarea: TextArea<'static>,
     pub query_result: Option<QueryResult>,
     pub result_scroll: usize,
     pub result_cursor: usize,
@@ -301,6 +302,7 @@ impl Tab {
             database_selected: 0,
             sidebar: SidebarState::default(),
             column_cache: std::collections::HashMap::new(),
+            query_textarea: TextArea::default(),
             query_result: None,
             result_scroll: 0,
             result_cursor: 0,
@@ -402,7 +404,6 @@ fn cycle_prev(index: &mut usize, len: usize) {
 pub struct Controller {
     pub mode: Mode,
     pub command_buffer: String,
-    pub query_textarea: TextArea<'static>,
     pub tabs: Vec<Tab>,
     pub current_tab: usize,
     pub quit: bool,
@@ -416,6 +417,8 @@ pub struct Controller {
     pub spinner_state: usize,
     pub clipboard: Option<arboard::Clipboard>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
+    /// Counter for generating unique session IDs
+    next_session_id: usize,
 }
 
 impl Controller {
@@ -439,7 +442,6 @@ impl Controller {
         let mut controller = Self {
             mode: Mode::Normal,
             command_buffer: String::new(),
-            query_textarea: TextArea::default(),
             tabs: vec![Tab::new(connections)],
             current_tab: 0,
             quit: false,
@@ -453,6 +455,7 @@ impl Controller {
             pending_ctrl_w: false,
             clipboard,
             last_click: None,
+            next_session_id: 1,
         };
 
         // Auto-initiate connection if --connect was provided
@@ -488,6 +491,11 @@ impl Controller {
         let mut current_tab_connected = false;
         let current_tab_idx = self.current_tab;
 
+        // Track tabs that need session IDs assigned: (tab_idx, conn_name)
+        // Only for tabs that are newly connecting (name is still "New")
+        let mut assign_session_ids: Vec<(usize, String)> = Vec::new();
+        let tabs_needing_session: Vec<bool> = self.tabs.iter().map(|t| t.name == "New").collect();
+
         for (tab_idx, tab) in self.tabs.iter_mut().enumerate() {
             let op = match tab.pending_operation.take() {
                 Some(op) => op,
@@ -504,7 +512,10 @@ impl Controller {
                         match result {
                             Ok(databases) => {
                                 crate::debug_log!("Found {} database(s)", databases.len());
-                                tab.name = conn_name;
+                                // Defer session name assignment until after the loop (only for new tabs)
+                                if tabs_needing_session[tab_idx] {
+                                    assign_session_ids.push((tab_idx, conn_name));
+                                }
                                 // Pre-select current database if switching
                                 let selected = tab
                                     .current_database
@@ -547,7 +558,10 @@ impl Controller {
                                     db_name,
                                     tables.len()
                                 );
-                                tab.name = conn_name;
+                                // Defer session name assignment until after the loop (only for new tabs)
+                                if tabs_needing_session[tab_idx] {
+                                    assign_session_ids.push((tab_idx, conn_name));
+                                }
                                 tab.current_database = Some(db_name);
                                 tab.db_client = Some(Arc::new(client));
                                 tab.sidebar.tables = tables;
@@ -668,9 +682,16 @@ impl Controller {
             }
         }
 
+        // Assign unique session names to newly connected tabs
+        for (tab_idx, conn_name) in assign_session_ids {
+            let session_id = self.next_session_id;
+            self.next_session_id += 1;
+            self.tabs[tab_idx].name = format!("{} #{}", conn_name, session_id);
+        }
+
         // Reset textarea if current tab just connected
         if current_tab_connected {
-            self.query_textarea = TextArea::default();
+            self.current_tab_mut().query_textarea = TextArea::default();
         }
     }
 }

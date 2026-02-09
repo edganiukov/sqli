@@ -60,8 +60,9 @@ impl App {
     }
 
     pub fn handle_resize(&mut self) {
-        self.controller.query_textarea.move_cursor(CursorMove::Top);
-        self.controller.query_textarea.move_cursor(CursorMove::Head);
+        let tab = self.controller.current_tab_mut();
+        tab.query_textarea.move_cursor(CursorMove::Top);
+        tab.query_textarea.move_cursor(CursorMove::Head);
     }
 
     pub fn tick_spinner(&mut self) {
@@ -441,22 +442,19 @@ impl App {
 
         let block = panel_block("Query", is_focused, Borders::BOTTOM);
 
-        self.controller
-            .query_textarea
+        let tab = self.controller.current_tab_mut();
+        tab.query_textarea
             .set_style(Style::default().bg(bg_color).fg(TEXT));
-        self.controller
-            .query_textarea
+        tab.query_textarea
             .set_cursor_style(Style::default().bg(if is_focused {
                 ratatui::style::Color::White
             } else {
                 TEXT_DIM
             }));
-        self.controller
-            .query_textarea
-            .set_cursor_line_style(Style::default());
-        self.controller.query_textarea.set_block(block);
-        self.controller.query_textarea.set_line_number_style(dim());
-        frame.render_widget(&self.controller.query_textarea, area);
+        tab.query_textarea.set_cursor_line_style(Style::default());
+        tab.query_textarea.set_block(block);
+        tab.query_textarea.set_line_number_style(dim());
+        frame.render_widget(&tab.query_textarea, area);
     }
 
     fn draw_query_output(&self, frame: &mut Frame, area: Rect) {

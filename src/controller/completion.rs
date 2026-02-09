@@ -5,11 +5,12 @@ use tui_textarea::CursorMove;
 
 impl Controller {
     pub(super) fn open_completion(&mut self) {
-        let query: String = self.query_textarea.lines().join("\n");
+        let query: String = self.current_tab().query_textarea.lines().join("\n");
 
         // Get cursor position in the full text
-        let (row, col) = self.query_textarea.cursor();
+        let (row, col) = self.current_tab().query_textarea.cursor();
         let cursor_pos: usize = self
+            .current_tab()
             .query_textarea
             .lines()
             .iter()
@@ -168,12 +169,12 @@ impl Controller {
             KeyCode::Char(_) => {
                 // Continue typing - close completion and pass key to textarea
                 self.popup_state = PopupState::None;
-                self.query_textarea.input(key_event);
+                self.current_tab_mut().query_textarea.input(key_event);
             }
             KeyCode::Backspace => {
                 // Continue typing - close completion and pass key to textarea
                 self.popup_state = PopupState::None;
-                self.query_textarea.input(key_event);
+                self.current_tab_mut().query_textarea.input(key_event);
             }
             _ => {}
         }
@@ -181,13 +182,9 @@ impl Controller {
 
     fn apply_completion(&mut self, suggestion: &Suggestion, word_start: usize) {
         // Get current cursor position
-        let (row, col) = self.query_textarea.cursor();
-        let lines: Vec<&str> = self
-            .query_textarea
-            .lines()
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
+        let tab = self.current_tab();
+        let (row, col) = tab.query_textarea.cursor();
+        let lines: Vec<&str> = tab.query_textarea.lines().iter().map(|s| s.as_str()).collect();
 
         // Calculate position in current line where word starts
         let mut pos = 0usize;
@@ -211,25 +208,26 @@ impl Controller {
         // Select from word start to current position and replace
         // Move cursor to word start
         let chars_to_move_back = col.saturating_sub(word_start_in_line);
+        let tab = self.current_tab_mut();
         for _ in 0..chars_to_move_back {
-            self.query_textarea.move_cursor(CursorMove::Back);
+            tab.query_textarea.move_cursor(CursorMove::Back);
         }
 
         // Select to end of word (current position)
         for _ in 0..chars_to_move_back {
-            self.query_textarea.move_cursor(CursorMove::Forward);
+            tab.query_textarea.move_cursor(CursorMove::Forward);
         }
 
         // Delete the current word and insert completion
         // First, delete characters from word_start to cursor
         for _ in 0..chars_to_move_back {
-            self.query_textarea.move_cursor(CursorMove::Back);
+            tab.query_textarea.move_cursor(CursorMove::Back);
         }
         for _ in 0..chars_to_move_back {
-            self.query_textarea.delete_next_char();
+            tab.query_textarea.delete_next_char();
         }
 
         // Insert the completion text
-        self.query_textarea.insert_str(&suggestion.text);
+        tab.query_textarea.insert_str(&suggestion.text);
     }
 }

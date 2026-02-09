@@ -229,7 +229,7 @@ impl Controller {
     }
 
     pub(super) fn execute_query(&mut self) {
-        let raw_query: String = self.query_textarea.lines().join("\n");
+        let raw_query: String = self.current_tab().query_textarea.lines().join("\n");
         let query = Self::strip_comments(&raw_query);
         self.run_query(&query);
     }
