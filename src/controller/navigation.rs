@@ -41,6 +41,10 @@ impl Controller {
             if self.current_tab >= self.tabs.len() {
                 self.current_tab = self.tabs.len() - 1;
             }
+            // Renumber tabs to be sequential (1, 2, 3, ...)
+            for (idx, tab) in self.tabs.iter_mut().enumerate() {
+                tab.id = idx + 1;
+            }
         }
     }
 
