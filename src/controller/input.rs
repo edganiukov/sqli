@@ -114,10 +114,11 @@ impl Controller {
     }
 
     pub(super) fn handle_database_view_keys(&mut self, key_event: KeyEvent) {
-        // Handle Ctrl-w + h/j/k/l for pane navigation (vim-style)
+        // Handle Ctrl-w + key for pane/tab navigation (vim-style)
         if self.pending_ctrl_w {
             self.pending_ctrl_w = false;
             match key_event.code {
+                // Pane navigation
                 KeyCode::Char('h') | KeyCode::Left => {
                     self.focus_left();
                     return;
@@ -137,6 +138,20 @@ impl Controller {
                 KeyCode::Char('w') => {
                     // Ctrl-w w cycles to next pane
                     self.focus_right();
+                    return;
+                }
+                // Tab navigation
+                KeyCode::Char('n') => {
+                    self.next_tab();
+                    return;
+                }
+                KeyCode::Char('p') => {
+                    self.previous_tab();
+                    return;
+                }
+                KeyCode::Char(c @ '1'..='9') => {
+                    let target_id = c.to_digit(10).unwrap() as usize;
+                    self.switch_to_tab_by_id(target_id);
                     return;
                 }
                 _ => {

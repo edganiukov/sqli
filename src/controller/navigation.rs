@@ -26,6 +26,12 @@ impl Controller {
         }
     }
 
+    pub fn switch_to_tab_by_id(&mut self, target_id: usize) {
+        if let Some(idx) = self.tabs.iter().position(|t| t.id == target_id) {
+            self.current_tab = idx;
+        }
+    }
+
     pub fn close_current_tab(&mut self) {
         if self.tabs.len() == 1 {
             // Last tab, quit the app.
