@@ -38,7 +38,7 @@ impl Controller {
                 tab.view_state = ViewState::DatabaseView;
             } else {
                 tab.view_state = ViewState::ConnectionList;
-                tab.name = "New".to_string();
+                tab.name = "new".to_string();
             }
             tab.databases.clear();
         }
@@ -102,7 +102,7 @@ impl Controller {
                 } else {
                     // Not connected - go back to connection list
                     tab.view_state = ViewState::ConnectionList;
-                    tab.name = "New".to_string();
+                    tab.name = "new".to_string();
                     tab.databases.clear();
                 }
             }

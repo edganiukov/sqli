@@ -292,7 +292,7 @@ impl Tab {
 
         Self {
             id,
-            name: "New".to_string(),
+            name: "new".to_string(),
             connections,
             selected_index: 0,
             connected_index: 0,
