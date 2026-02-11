@@ -4,7 +4,9 @@ impl Controller {
     pub fn new_tab(&mut self) {
         // Clone connections from first tab for now
         let connections = self.tabs[0].connections.clone();
-        self.tabs.push(super::Tab::new(connections));
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        self.tabs.push(super::Tab::new(id, connections));
         self.current_tab = self.tabs.len() - 1;
     }
 

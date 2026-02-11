@@ -666,12 +666,14 @@ impl Controller {
     }
 
     fn handle_mouse_tab_bar(&mut self, x: u16) {
-        // Tabs are rendered as " TabName " with a space separator
+        // Tabs are rendered as " [id:name] " with a space separator
         // Calculate which tab was clicked
         let mut current_x = 0u16;
 
         for (i, tab) in self.tabs.iter().enumerate() {
-            let tab_width = (tab.name.len() + 4) as u16; //  [TabName]
+            // Format: " [id:name] " = name.len() + id_digits + 5
+            let id_width = if tab.id >= 10 { 2 } else { 1 };
+            let tab_width = (tab.name.len() + id_width + 5) as u16;
 
             if x >= current_x && x < current_x + tab_width {
                 self.current_tab = i;
