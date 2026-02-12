@@ -446,11 +446,9 @@ impl App {
         tab.query_textarea
             .set_style(Style::default().bg(bg_color).fg(TEXT));
         tab.query_textarea
-            .set_cursor_style(Style::default().bg(if is_focused {
-                ratatui::style::Color::White
-            } else {
-                TEXT_DIM
-            }));
+            .set_cursor_style(Style::default()
+                .fg(bg_color)
+                .bg(if is_focused { TEXT } else { TEXT_DIM }));
         tab.query_textarea.set_cursor_line_style(Style::default());
         tab.query_textarea.set_block(block);
         tab.query_textarea.set_line_number_style(dim());
