@@ -371,7 +371,20 @@ impl App {
         let sidebar_hidden = self.controller.current_tab().sidebar_hidden;
 
         let right_area = if sidebar_hidden {
-            area
+            // Keep a 1-column strip on the left with a right border — mirrors the
+            // sidebar's right edge so the layout doesn't feel flush to the terminal wall.
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(1), Constraint::Min(1)])
+                .split(area);
+            frame.render_widget(
+                Block::default()
+                    .borders(Borders::RIGHT)
+                    .border_style(Style::default().fg(TEXT_DIM))
+                    .style(Style::default().bg(SURFACE_DIM)),
+                cols[0],
+            );
+            cols[1]
         } else {
             let main_chunks = Layout::default()
                 .direction(Direction::Horizontal)
