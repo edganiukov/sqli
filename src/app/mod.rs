@@ -705,6 +705,9 @@ impl App {
             } => {
                 popups::draw_completion(frame, &self.controller, suggestions, *selected);
             }
+            PopupState::Help { scroll } => {
+                popups::draw_help(frame, *scroll);
+            }
             PopupState::None => {}
         }
     }

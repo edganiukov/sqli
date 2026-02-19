@@ -4,6 +4,12 @@ use tui_textarea::CursorMove;
 
 impl Controller {
     pub fn handle_normal_mode(&mut self, key_event: KeyEvent) {
+        // Handle help popup from any state
+        if matches!(self.popup_state, PopupState::Help { .. }) {
+            self.handle_help_popup_keys(key_event.code);
+            return;
+        }
+
         // Esc cancels pending operation (if any)
         if key_event.code == KeyCode::Esc && self.cancel_pending_operation() {
             return;
@@ -15,6 +21,54 @@ impl Controller {
             ViewState::DatabaseList => self.handle_database_list_keys(key_event.code),
             ViewState::DatabaseView => self.handle_database_view_keys(key_event),
         }
+    }
+
+    fn handle_help_popup_keys(&mut self, key_code: KeyCode) {
+        let PopupState::Help { scroll } = self.popup_state else {
+            return;
+        };
+
+        // Total help lines (must match the entries count in popups::help_lines)
+        const HELP_TOTAL_LINES: usize = 57;
+
+        match key_code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                self.popup_state = PopupState::None;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.popup_state = PopupState::Help {
+                    scroll: scroll.saturating_add(1).min(HELP_TOTAL_LINES),
+                };
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.popup_state = PopupState::Help {
+                    scroll: scroll.saturating_sub(1),
+                };
+            }
+            KeyCode::PageDown => {
+                self.popup_state = PopupState::Help {
+                    scroll: scroll.saturating_add(10).min(HELP_TOTAL_LINES),
+                };
+            }
+            KeyCode::PageUp => {
+                self.popup_state = PopupState::Help {
+                    scroll: scroll.saturating_sub(10),
+                };
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                self.popup_state = PopupState::Help { scroll: 0 };
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                self.popup_state = PopupState::Help {
+                    scroll: HELP_TOTAL_LINES,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    fn open_help_popup(&mut self) {
+        self.popup_state = PopupState::Help { scroll: 0 };
     }
 
     /// Cancel any pending async operation on the current tab. Returns true if something was cancelled.
@@ -68,6 +122,9 @@ impl Controller {
             KeyCode::Char('t') => {
                 self.new_tab();
             }
+            KeyCode::Char('?') => {
+                self.open_help_popup();
+            }
             KeyCode::Enter => {
                 self.initiate_connection();
             }
@@ -92,6 +149,9 @@ impl Controller {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.current_tab_mut().database_prev();
+            }
+            KeyCode::Char('?') => {
+                self.open_help_popup();
             }
             KeyCode::Esc => {
                 let tab = self.current_tab_mut();
@@ -215,6 +275,9 @@ impl Controller {
             KeyCode::Char('r') => {
                 self.refresh_tables();
             }
+            KeyCode::Char('?') => {
+                self.open_help_popup();
+            }
             KeyCode::F(5) => {
                 self.execute_query();
             }
@@ -229,15 +292,22 @@ impl Controller {
             return;
         }
 
-        // Handle Esc + : for command mode
+        // Handle Esc + : for command mode, Esc + ? for help
         if self.pending_escape {
             self.pending_escape = false;
-            if key_event.code == KeyCode::Char(':') {
-                self.mode = Mode::Command;
-                self.command_buffer.clear();
-                return;
+            match key_event.code {
+                KeyCode::Char(':') => {
+                    self.mode = Mode::Command;
+                    self.command_buffer.clear();
+                    return;
+                }
+                KeyCode::Char('?') => {
+                    self.open_help_popup();
+                    return;
+                }
+                // Any other key after Esc - pass through
+                _ => {}
             }
-            // Any other key after Esc - pass through
         }
 
         // Esc sets pending_escape flag
@@ -430,6 +500,9 @@ impl Controller {
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_buffer.clear();
+            }
+            KeyCode::Char('?') => {
+                self.open_help_popup();
             }
             KeyCode::Tab => {
                 self.focus_sidebar();

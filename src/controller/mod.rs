@@ -99,6 +99,9 @@ pub enum PopupState {
         selected_field: usize,
         scroll: usize,
     },
+    Help {
+        scroll: usize,
+    },
     Completion {
         suggestions: Vec<crate::completion::Suggestion>,
         selected: usize,

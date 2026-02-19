@@ -419,6 +419,195 @@ pub fn draw_record_detail(
     frame.render_widget(Paragraph::new(help).alignment(Alignment::Center), help_area);
 }
 
+/// Draw help popup
+pub fn draw_help(frame: &mut Frame, scroll: usize) {
+    let area = frame.area();
+    let popup_area = centered_rect_pct(area, 0.62, 0.85, 64, 20);
+    frame.render_widget(Clear, popup_area);
+
+    let block = popup_block("Help", BLUE);
+    let block_inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    // Reserve bottom line for key hints
+    let content_area = Rect {
+        x: block_inner.x,
+        y: block_inner.y,
+        width: block_inner.width,
+        height: block_inner.height.saturating_sub(2),
+    };
+    let hint_area = Rect {
+        x: block_inner.x,
+        y: block_inner.y + block_inner.height.saturating_sub(1),
+        width: block_inner.width,
+        height: 1,
+    };
+
+    // Build help lines
+    let key_col: usize = 16;
+    let lines = help_lines(key_col, content_area.width as usize);
+
+    let total = lines.len();
+    let visible = content_area.height as usize;
+    let max_scroll = total.saturating_sub(visible);
+    let scroll = scroll.min(max_scroll);
+
+    let paragraph = Paragraph::new(lines)
+        .style(Style::default().bg(SURFACE))
+        .scroll((scroll as u16, 0));
+    frame.render_widget(paragraph, content_area);
+
+    // Scrollbar
+    if total > visible {
+        let thumb_h = (visible * visible / total).max(1);
+        let thumb_pos = if max_scroll > 0 {
+            scroll * (visible - thumb_h) / max_scroll
+        } else {
+            0
+        };
+        let scrollbar: String = (0..visible)
+            .map(|i| {
+                if i >= thumb_pos && i < thumb_pos + thumb_h {
+                    "█"
+                } else {
+                    "░"
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let sb_area = Rect {
+            x: content_area.x + content_area.width.saturating_sub(1),
+            y: content_area.y,
+            width: 1,
+            height: content_area.height,
+        };
+        frame.render_widget(
+            Paragraph::new(scrollbar).style(Style::default().fg(TEXT_DIM).bg(SURFACE)),
+            sb_area,
+        );
+    }
+
+    // Bottom hint
+    let hint = Line::from(vec![
+        Span::styled("j/k", Style::default().fg(TEXT)),
+        Span::styled(" scroll  ", dim()),
+        Span::styled("?/Esc/q", Style::default().fg(TEXT)),
+        Span::styled(" close", dim()),
+    ]);
+    frame.render_widget(
+        Paragraph::new(hint).alignment(Alignment::Center),
+        hint_area,
+    );
+}
+
+fn help_lines<'a>(key_col: usize, total_width: usize) -> Vec<Line<'a>> {
+    // Each entry: (key, description) — empty key means section header
+    #[rustfmt::skip]
+    let entries: &[(&str, &str)] = &[
+        // ── Navigation ──────────────────────────────────────────────────
+        ("Navigation", ""),
+        ("Tab / BackTab",     "cycle between panes"),
+        ("^W h/l/j/k",       "move focus left / right / up / down"),
+        ("^W w",             "cycle to next pane"),
+        ("^W n/p",           "next / previous tab"),
+        ("^W 1-9",           "switch to tab by id"),
+        ("", ""),
+
+        // ── DB View — General ────────────────────────────────────────────
+        ("DB View", ""),
+        ("^B",               "toggle sidebar"),
+        ("F5 / ^E",          "execute query"),
+        ("^G",               "edit query in external editor"),
+        ("^O",               "open template list"),
+        ("^S",               "save query as template"),
+        ("^Space",           "trigger autocompletion"),
+        ("", ""),
+
+        // ── Sidebar ──────────────────────────────────────────────────────
+        ("Sidebar", ""),
+        ("j / k",            "navigate tables"),
+        ("Enter",            "run SELECT * from table"),
+        ("d",                "describe table"),
+        ("r",                "refresh table list"),
+        ("l / →",            "focus query editor"),
+        ("", ""),
+
+        // ── Query Editor ─────────────────────────────────────────────────
+        ("Query Editor", ""),
+        ("F5 / ^E",          "execute query"),
+        ("^Z / ^R",          "undo / redo"),
+        ("^K",               "delete to end of line"),
+        ("^← / ^→",          "word back / forward"),
+        ("Tab",              "focus results panel"),
+        ("BackTab",          "focus sidebar"),
+        ("Esc :",            "enter command mode"),
+        ("Esc ?",            "open this help"),
+        ("", ""),
+
+        // ── Results ──────────────────────────────────────────────────────
+        ("Results", ""),
+        ("j / k",            "move cursor down / up"),
+        ("h / l",            "move column left / right"),
+        ("g g / G",          "first / last row"),
+        ("PgUp / PgDn",      "scroll by 10 rows"),
+        ("^ / $",            "first / last column"),
+        ("v",                "visual select (cells in column)"),
+        ("V",                "visual select (whole rows)"),
+        ("y",                "yank (copy) selection to clipboard"),
+        ("Enter",            "open record detail popup"),
+        ("Tab",              "focus sidebar"),
+        ("", ""),
+
+        // ── Commands ─────────────────────────────────────────────────────
+        ("Commands", ""),
+        (":q",               "close current tab"),
+        (":qa / :q!",        "quit"),
+        (":db",              "switch database"),
+        (":new",             "open new tab"),
+        (":next / :prev",    "navigate tabs"),
+        (":system",          "toggle system databases (DB list view)"),
+        ("", ""),
+
+        // ── Connection List ───────────────────────────────────────────────
+        ("Connection List", ""),
+        ("j / k",            "navigate connections"),
+        ("h / l",            "switch connection group"),
+        ("Enter",            "connect"),
+        ("t",                "open new tab"),
+    ];
+
+    let mut lines: Vec<Line<'a>> = Vec::new();
+    let sep_width = total_width.saturating_sub(4); // 2 spaces padding each side
+
+    for (key, desc) in entries {
+        if key.is_empty() {
+            // Blank spacer
+            lines.push(Line::from(""));
+            continue;
+        }
+        if desc.is_empty() {
+            // Section header
+            let title = format!(" {} ", key);
+            let dashes_total = sep_width.saturating_sub(title.len());
+            let left = dashes_total / 2;
+            let right = dashes_total - left;
+            lines.push(Line::from(vec![
+                Span::styled("─".repeat(left), Style::default().fg(TEXT_DIM)),
+                Span::styled(title, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled("─".repeat(right), Style::default().fg(TEXT_DIM)),
+            ]));
+        } else {
+            // Key–description row
+            let key_str = format!(" {:<width$}", key, width = key_col);
+            lines.push(Line::from(vec![
+                Span::styled(key_str, Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
+                Span::styled(*desc, Style::default().fg(TEXT_DIM)),
+            ]));
+        }
+    }
+    lines
+}
+
 /// Draw completion popup
 pub fn draw_completion(
     frame: &mut Frame,

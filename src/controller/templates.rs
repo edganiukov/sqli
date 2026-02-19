@@ -84,6 +84,9 @@ impl Controller {
             PopupState::RecordDetail { .. } => {
                 // Handled in handle_output_keys
             }
+            PopupState::Help { .. } => {
+                // Handled in handle_normal_mode (before any view dispatch)
+            }
             PopupState::Completion {
                 suggestions,
                 selected,
