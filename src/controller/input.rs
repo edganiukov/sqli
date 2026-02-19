@@ -169,6 +169,14 @@ impl Controller {
             return;
         }
 
+        // Ctrl+B toggles sidebar visibility
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('b')
+        {
+            self.toggle_sidebar();
+            return;
+        }
+
         let focus = self.current_tab().focus;
         match focus {
             Focus::Sidebar => self.handle_sidebar_keys(key_event.code),
@@ -651,8 +659,9 @@ impl Controller {
                 const SIDEBAR_WIDTH: u16 = 40;
                 let main_area_height = term_size.1 - 3;
                 let query_height = main_area_height * 35 / 100;
+                let sidebar_hidden = self.current_tab().sidebar_hidden;
 
-                if x < SIDEBAR_WIDTH {
+                if !sidebar_hidden && x < SIDEBAR_WIDTH {
                     // Scroll in sidebar
                     let tab = self.current_tab_mut();
                     let table_count = tab.sidebar.tables.len();
@@ -774,8 +783,9 @@ impl Controller {
         const SIDEBAR_WIDTH: u16 = 40;
         let main_area_height = term_size.1 - 3; // minus tab bar, status, command
         let query_height = main_area_height * 35 / 100;
+        let sidebar_hidden = self.current_tab().sidebar_hidden;
 
-        if x < SIDEBAR_WIDTH {
+        if !sidebar_hidden && x < SIDEBAR_WIDTH {
             // Clicked on sidebar
             self.current_tab_mut().focus = Focus::Sidebar;
 

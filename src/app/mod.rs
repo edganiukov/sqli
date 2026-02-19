@@ -368,17 +368,23 @@ impl App {
     }
 
     fn draw_database_view(&mut self, frame: &mut Frame, area: Rect) {
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(40), Constraint::Min(1)])
-            .split(area);
+        let sidebar_hidden = self.controller.current_tab().sidebar_hidden;
 
-        self.draw_sidebar(frame, main_chunks[0]);
+        let right_area = if sidebar_hidden {
+            area
+        } else {
+            let main_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(40), Constraint::Min(1)])
+                .split(area);
+            self.draw_sidebar(frame, main_chunks[0]);
+            main_chunks[1]
+        };
 
         let right_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-            .split(main_chunks[1]);
+            .split(right_area);
 
         self.draw_query_input(frame, right_chunks[0]);
         self.draw_query_output(frame, right_chunks[1]);

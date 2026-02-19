@@ -48,10 +48,20 @@ impl Controller {
         }
     }
 
+    pub(super) fn toggle_sidebar(&mut self) {
+        let tab = self.current_tab_mut();
+        tab.sidebar_hidden = !tab.sidebar_hidden;
+        // If sidebar was focused and is now hidden, move focus to query
+        if tab.sidebar_hidden && tab.focus == Focus::Sidebar {
+            tab.focus = Focus::Query;
+        }
+    }
+
     pub(super) fn focus_left(&mut self) {
-        // From Query or Output -> Sidebar
+        // From Query or Output -> Sidebar (only when sidebar is visible)
         let focus = self.current_tab().focus;
-        if focus == Focus::Query || focus == Focus::Output {
+        let sidebar_hidden = self.current_tab().sidebar_hidden;
+        if !sidebar_hidden && (focus == Focus::Query || focus == Focus::Output) {
             self.current_tab_mut().focus = Focus::Sidebar;
         }
     }
@@ -78,7 +88,10 @@ impl Controller {
     }
 
     pub(super) fn focus_sidebar(&mut self) {
-        self.current_tab_mut().focus = Focus::Sidebar;
+        // Only focus sidebar when it is visible
+        if !self.current_tab().sidebar_hidden {
+            self.current_tab_mut().focus = Focus::Sidebar;
+        }
     }
 
     pub(super) fn scroll_to_end(&mut self) {
@@ -160,13 +173,18 @@ impl Controller {
             _ => return,
         };
 
+        let sidebar_hidden = self.current_tab().sidebar_hidden;
         let tab = self.current_tab_mut();
         tab.result_selected_col = max_col;
 
-        // Calculate actual visible width from terminal size minus sidebar
+        // Calculate actual visible width from terminal size, minus sidebar when visible
         let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
         const SIDEBAR_WIDTH: usize = 40;
-        let visible_width = term_width.saturating_sub(SIDEBAR_WIDTH);
+        let visible_width = if sidebar_hidden {
+            term_width
+        } else {
+            term_width.saturating_sub(SIDEBAR_WIDTH)
+        };
         tab.result_h_scroll = total_width.saturating_sub(visible_width);
     }
 
@@ -195,6 +213,8 @@ impl Controller {
             _ => return,
         };
 
+        // Read sidebar_hidden before the mutable borrow
+        let sidebar_hidden = self.current_tab().sidebar_hidden;
         let tab = self.current_tab_mut();
 
         // Update selected column
@@ -212,10 +232,14 @@ impl Controller {
                 .copied()
                 .unwrap_or(0);
 
-        // Calculate actual visible width from terminal size minus sidebar
+        // Calculate actual visible width from terminal size, minus sidebar when visible
         let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
         const SIDEBAR_WIDTH: usize = 40;
-        let visible_width = term_width.saturating_sub(SIDEBAR_WIDTH);
+        let visible_width = if sidebar_hidden {
+            term_width
+        } else {
+            term_width.saturating_sub(SIDEBAR_WIDTH)
+        };
 
         if col_start < tab.result_h_scroll {
             // Column is to the left of viewport
