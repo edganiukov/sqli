@@ -498,14 +498,22 @@ impl App {
         let inner_area = block.inner(area);
         frame.render_widget(block, area);
 
+        // Add padding to output content
+        let padded_area = Rect {
+            x: inner_area.x + 1,
+            y: inner_area.y,
+            width: inner_area.width.saturating_sub(2),
+            height: inner_area.height,
+        };
+
         match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
-                self.draw_result_table(frame, inner_area, columns, rows, is_focused, bg_color);
+                self.draw_result_table(frame, padded_area, columns, rows, is_focused, bg_color);
             }
             Some(QueryResult::Execute { rows_affected }) => {
                 let msg = Paragraph::new(format!("{} row(s) affected", rows_affected))
                     .style(Style::default().fg(SUCCESS).bg(bg_color));
-                frame.render_widget(msg, inner_area);
+                frame.render_widget(msg, padded_area);
             }
             None => {
                 let msg = Paragraph::new(Line::from(vec![
@@ -514,7 +522,7 @@ impl App {
                     Span::styled(" to execute query", dim()),
                 ]))
                 .style(Style::default().bg(bg_color));
-                frame.render_widget(msg, inner_area);
+                frame.render_widget(msg, padded_area);
             }
         }
     }
