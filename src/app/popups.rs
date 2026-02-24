@@ -494,10 +494,7 @@ pub fn draw_help(frame: &mut Frame, scroll: usize) {
         Span::styled("?/Esc/q", Style::default().fg(TEXT)),
         Span::styled(" close", dim()),
     ]);
-    frame.render_widget(
-        Paragraph::new(hint).alignment(Alignment::Center),
-        hint_area,
-    );
+    frame.render_widget(Paragraph::new(hint).alignment(Alignment::Center), hint_area);
 }
 
 fn help_lines<'a>(key_col: usize, total_width: usize) -> Vec<Line<'a>> {
@@ -593,14 +590,20 @@ fn help_lines<'a>(key_col: usize, total_width: usize) -> Vec<Line<'a>> {
             let right = dashes_total - left;
             lines.push(Line::from(vec![
                 Span::styled("─".repeat(left), Style::default().fg(TEXT_DIM)),
-                Span::styled(title, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    title,
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("─".repeat(right), Style::default().fg(TEXT_DIM)),
             ]));
         } else {
             // Key–description row
             let key_str = format!(" {:<width$}", key, width = key_col);
             lines.push(Line::from(vec![
-                Span::styled(key_str, Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    key_str,
+                    Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(*desc, Style::default().fg(TEXT_DIM)),
             ]));
         }

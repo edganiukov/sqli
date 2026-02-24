@@ -184,7 +184,12 @@ impl Controller {
         // Get current cursor position
         let tab = self.current_tab();
         let (row, col) = tab.query_textarea.cursor();
-        let lines: Vec<&str> = tab.query_textarea.lines().iter().map(|s| s.as_str()).collect();
+        let lines: Vec<&str> = tab
+            .query_textarea
+            .lines()
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
 
         // Calculate position in current line where word starts
         let mut pos = 0usize;

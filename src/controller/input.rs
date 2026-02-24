@@ -364,11 +364,15 @@ impl Controller {
                 }
 
                 KeyCode::Left => {
-                    self.current_tab_mut().query_textarea.move_cursor(CursorMove::WordBack);
+                    self.current_tab_mut()
+                        .query_textarea
+                        .move_cursor(CursorMove::WordBack);
                     return;
                 }
                 KeyCode::Right => {
-                    self.current_tab_mut().query_textarea.move_cursor(CursorMove::WordForward);
+                    self.current_tab_mut()
+                        .query_textarea
+                        .move_cursor(CursorMove::WordForward);
                     return;
                 }
                 _ => {
