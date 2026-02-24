@@ -172,6 +172,12 @@ fn default_connections() -> Vec<DatabaseConn> {
 ///   ch  - Native TCP protocol (default, port 9000)
 ///   chh - HTTP API (port 8123)
 ///
+/// SQLite:
+///   sq:///path/to/database.db               (local, absolute path)
+///   sq://./local.db                         (local, relative path)
+///   sq://user@host/path/to/database.db     (remote via SSH)
+///   sq://user@host:22/path/to/database.db  (remote via SSH with port)
+///
 /// Examples:
 ///   pg://postgres:secret@localhost:5432/mydb
 ///   pgs://postgres@secure.example.com/mydb  (with TLS)
@@ -181,6 +187,7 @@ fn default_connections() -> Vec<DatabaseConn> {
 ///   chh://default@localhost:8123/default    (HTTP API)
 ///   sq:///path/to/database.db
 ///   sq://./local.db
+///   sq://deploy@server.example.com/home/user/app.db
 pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
     // Parse scheme (type)
     let (scheme, rest) = url
@@ -209,27 +216,55 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         }
     };
 
-    // SQLite has special handling - the rest is just a file path (no TLS)
+    // SQLite has special handling
+    // Formats:
+    //   sq:///absolute/path.db         -> local, path="/absolute/path.db"
+    //   sq://./relative/path.db        -> local, path="./relative/path.db"
+    //   sq://user@host/path.db         -> SSH, host="user@host", path="/path.db"
+    //   sq://user@host:22/path.db      -> SSH, host="user@host:22", path="/path.db"
     if matches!(db_type, DatabaseType::Sqlite) {
-        let path = if rest.is_empty() {
+        if rest.is_empty() {
             return Err("SQLite requires a file path".to_string());
+        }
+
+        // Check if it's a local path (starts with / or .)
+        let is_local = rest.starts_with('/') || rest.starts_with('.');
+
+        let (host, path) = if is_local {
+            // Local file: sq:///path or sq://./path
+            (String::new(), rest.to_string())
         } else {
-            rest.to_string()
+            // Remote via SSH: sq://user@host[:port]/path
+            // Find the first / after the host part
+            if let Some(slash_idx) = rest.find('/') {
+                let host_part = &rest[..slash_idx];
+                let path_part = &rest[slash_idx..]; // includes leading /
+                (host_part.to_string(), path_part.to_string())
+            } else {
+                return Err(
+                    "SSH SQLite requires a path after host (e.g., sq://user@host/path.db)"
+                        .to_string(),
+                );
+            }
         };
 
-        let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+        let name = if host.is_empty() {
+            path.rsplit('/').next().unwrap_or(&path).to_string()
+        } else {
+            format!("{}:{}", host, path.rsplit('/').next().unwrap_or(&path))
+        };
 
         return Ok(DatabaseConn {
             name,
             db_type,
-            host: String::new(),
+            host,
             port: 0,
             user: String::new(),
             password: None,
             password_cmd: None,
             database: None,
             path: Some(path),
-            tls: false, // SQLite doesn't use TLS
+            tls: false,
             readonly: false,
             group: None,
             protocol: None,
@@ -493,5 +528,40 @@ mod tests {
         assert_eq!(conn.protocol, Some("http".to_string()));
         assert!(conn.tls);
         assert_eq!(conn.port, 8443);
+    }
+
+    #[test]
+    fn test_parse_sqlite_ssh() {
+        let conn =
+            parse_connection_string("sq://deploy@server.example.com/home/user/app.db").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Sqlite));
+        assert_eq!(conn.host, "deploy@server.example.com");
+        assert_eq!(conn.path, Some("/home/user/app.db".to_string()));
+        assert_eq!(conn.name, "deploy@server.example.com:app.db");
+    }
+
+    #[test]
+    fn test_parse_sqlite_ssh_with_port() {
+        let conn =
+            parse_connection_string("sq://deploy@server.example.com:2222/data/app.db").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Sqlite));
+        assert_eq!(conn.host, "deploy@server.example.com:2222");
+        assert_eq!(conn.path, Some("/data/app.db".to_string()));
+    }
+
+    #[test]
+    fn test_parse_sqlite_local_absolute() {
+        let conn = parse_connection_string("sq:///var/lib/data.db").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Sqlite));
+        assert_eq!(conn.host, ""); // empty = local
+        assert_eq!(conn.path, Some("/var/lib/data.db".to_string()));
+    }
+
+    #[test]
+    fn test_parse_sqlite_local_relative() {
+        let conn = parse_connection_string("sq://./data/local.db").unwrap();
+        assert!(matches!(conn.db_type, DatabaseType::Sqlite));
+        assert_eq!(conn.host, ""); // empty = local
+        assert_eq!(conn.path, Some("./data/local.db".to_string()));
     }
 }

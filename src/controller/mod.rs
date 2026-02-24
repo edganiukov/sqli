@@ -224,9 +224,17 @@ impl DatabaseConn {
                 DatabaseClient::ClickHouse(client)
             }
             DatabaseType::Sqlite => {
-                let path = self.path.as_deref().unwrap_or(&self.host);
-                let client = crate::sqlite::SqliteClient::connect(path).await?;
-                DatabaseClient::Sqlite(client)
+                let path = self.path.as_deref().unwrap_or_default();
+                if self.host.is_empty() {
+                    // Local SQLite
+                    let client = crate::sqlite::SqliteClient::connect(path).await?;
+                    DatabaseClient::Sqlite(client)
+                } else {
+                    // Remote SQLite via SSH
+                    let client =
+                        crate::ssh_sqlite::SshSqliteClient::connect(&self.host, path).await?;
+                    DatabaseClient::SshSqlite(client)
+                }
             }
         };
         Ok((client, pwd_warning))
@@ -497,8 +505,6 @@ impl Controller {
         // Track if current tab connected (to reset textarea)
         let mut current_tab_connected = false;
         let current_tab_idx = self.current_tab;
-
-
 
         for (tab_idx, tab) in self.tabs.iter_mut().enumerate() {
             let op = match tab.pending_operation.take() {

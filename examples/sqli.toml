@@ -55,6 +55,14 @@ type = "sqlite"
 path = "./examples/sqlite.db"
 group = "Local"
 
+# SQLite over SSH - connects to remote host and opens SQLite file there
+# Uses system ssh command, respects ~/.ssh/config and SSH_AUTH_SOCK
+[remote-sqlite]
+type = "sqlite"
+path = "/home/deploy/app/production.db"
+host = "deploy@server.example.com:22"  # or just "deploy@server.example.com"
+group = "Prod"
+
 # Example production connection (different group)
 [prod-postgres]
 type = "postgres"

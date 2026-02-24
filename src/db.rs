@@ -19,6 +19,7 @@ pub enum DatabaseClient {
     Cassandra(crate::cassandra::CassandraClient),
     ClickHouse(crate::clickhouse::ClickHouseClient),
     Sqlite(crate::sqlite::SqliteClient),
+    SshSqlite(crate::ssh_sqlite::SshSqliteClient),
 }
 
 impl DatabaseClient {
@@ -29,6 +30,7 @@ impl DatabaseClient {
             DatabaseClient::Cassandra(client) => client.list_databases(include_system).await,
             DatabaseClient::ClickHouse(client) => client.list_databases(include_system).await,
             DatabaseClient::Sqlite(client) => client.list_databases(include_system).await,
+            DatabaseClient::SshSqlite(client) => client.list_databases(include_system).await,
         }
     }
 
@@ -39,6 +41,7 @@ impl DatabaseClient {
             DatabaseClient::Cassandra(client) => client.list_tables(schema).await,
             DatabaseClient::ClickHouse(client) => client.list_tables(schema).await,
             DatabaseClient::Sqlite(client) => client.list_tables(schema).await,
+            DatabaseClient::SshSqlite(client) => client.list_tables(schema).await,
         }
     }
 
@@ -49,6 +52,7 @@ impl DatabaseClient {
             DatabaseClient::Cassandra(client) => client.execute_query(query).await,
             DatabaseClient::ClickHouse(client) => client.execute_query(query).await,
             DatabaseClient::Sqlite(client) => client.execute_query(query).await,
+            DatabaseClient::SshSqlite(client) => client.execute_query(query).await,
         }
     }
 
@@ -60,6 +64,7 @@ impl DatabaseClient {
             DatabaseClient::Cassandra(client) => client.select_table_query(table, limit, schema),
             DatabaseClient::ClickHouse(client) => client.select_table_query(table, limit, schema),
             DatabaseClient::Sqlite(client) => client.select_table_query(table, limit, schema),
+            DatabaseClient::SshSqlite(client) => client.select_table_query(table, limit, schema),
         }
     }
 
@@ -71,6 +76,7 @@ impl DatabaseClient {
             DatabaseClient::Cassandra(client) => client.describe_table_query(table, schema),
             DatabaseClient::ClickHouse(client) => client.describe_table_query(table, schema),
             DatabaseClient::Sqlite(client) => client.describe_table_query(table, schema),
+            DatabaseClient::SshSqlite(client) => client.describe_table_query(table, schema),
         }
     }
 
@@ -82,6 +88,7 @@ impl DatabaseClient {
             DatabaseClient::Cassandra(client) => client.list_columns(table, schema).await,
             DatabaseClient::ClickHouse(client) => client.list_columns(table, schema).await,
             DatabaseClient::Sqlite(client) => client.list_columns(table, schema).await,
+            DatabaseClient::SshSqlite(client) => client.list_columns(table, schema).await,
         }
     }
 }

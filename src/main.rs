@@ -12,6 +12,7 @@ mod format;
 mod mysql;
 mod postgres;
 mod sqlite;
+mod ssh_sqlite;
 mod templates;
 
 use std::io;
