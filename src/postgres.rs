@@ -1,10 +1,12 @@
 use crate::db::QueryResult;
 use crate::error::Result;
 use crate::format as fmt;
+
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde_json::Value as JsonValue;
-use tokio_postgres::types::Type;
+use tokio_postgres::types::{FromSql, Kind, Type};
 use tokio_postgres::{Client, NoTls, Row};
+use uuid::Uuid;
 
 pub struct PostgresClient {
     client: Client,
@@ -139,7 +141,7 @@ impl PostgresClient {
     fn get_column_value(row: &Row, idx: usize) -> String {
         let col_type = row.columns()[idx].type_();
 
-        // Helper macro to reduce boilerplate for simple types
+        // Helper macro for scalar types: get Option<T>, format with null_or
         macro_rules! get_value {
             ($t:ty) => {
                 row.try_get::<_, Option<$t>>(idx).map(fmt::null_or)
@@ -150,7 +152,16 @@ impl PostgresClient {
             };
         }
 
+        // Helper macro for array types: get Option<Vec<T>>, format as {a,b,c}
+        macro_rules! get_array {
+            ($t:ty) => {
+                row.try_get::<_, Option<Vec<$t>>>(idx)
+                    .map(|v| fmt::null_or_else(v, |arr| fmt::pg_array(&arr)))
+            };
+        }
+
         let result: std::result::Result<String, _> = match *col_type {
+            // Scalar types
             Type::BOOL => get_value!(bool),
             Type::INT2 => get_value!(i16),
             Type::INT4 | Type::OID => get_value!(i32),
@@ -161,6 +172,7 @@ impl PostgresClient {
             Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN => row
                 .try_get::<_, Option<String>>(idx)
                 .map(|v| v.unwrap_or_else(|| "NULL".to_string())),
+            Type::UUID => get_value!(Uuid),
             Type::JSON | Type::JSONB => get_value!(JsonValue),
             Type::TIMESTAMP => get_value!(NaiveDateTime, |t: NaiveDateTime| t
                 .format("%Y-%m-%d %H:%M:%S%.3f")
@@ -173,29 +185,85 @@ impl PostgresClient {
                 .format("%H:%M:%S%.3f")
                 .to_string()),
             Type::BYTEA => get_value!(Vec<u8>, |b: Vec<u8>| fmt::bytes(&b, 32)),
-            Type::TEXT_ARRAY => {
-                get_value!(Vec<String>, |arr: Vec<String>| format!(
-                    "{{{}}}",
-                    arr.join(",")
-                ))
+
+            // Array types
+            Type::BOOL_ARRAY => get_array!(bool),
+            Type::INT2_ARRAY => get_array!(i16),
+            Type::INT4_ARRAY => get_array!(i32),
+            Type::INT8_ARRAY => get_array!(i64),
+            Type::FLOAT4_ARRAY => get_array!(f32),
+            Type::FLOAT8_ARRAY => get_array!(f64),
+            Type::NUMERIC_ARRAY => get_array!(rust_decimal::Decimal),
+            Type::TEXT_ARRAY | Type::VARCHAR_ARRAY | Type::BPCHAR_ARRAY | Type::NAME_ARRAY => {
+                get_array!(String)
             }
-            Type::INT4_ARRAY => get_value!(Vec<i32>, |arr: Vec<i32>| {
-                format!(
-                    "{{{}}}",
-                    arr.iter()
-                        .map(|n| n.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-            }),
-            _ => {
-                // For unsupported types, try string first, then show type name
-                row.try_get::<_, Option<String>>(idx)
-                    .map(|v| v.unwrap_or_else(|| "NULL".to_string()))
-                    .or_else(|_| Ok(format!("<{}>", col_type.name())))
+            Type::UUID_ARRAY => get_array!(Uuid),
+            Type::JSON_ARRAY | Type::JSONB_ARRAY => get_array!(JsonValue),
+            Type::TIMESTAMP_ARRAY => get_array!(NaiveDateTime),
+            Type::TIMESTAMPTZ_ARRAY => get_array!(DateTime<Utc>),
+            Type::DATE_ARRAY => get_array!(NaiveDate),
+            Type::BYTEA_ARRAY => {
+                row.try_get::<_, Option<Vec<Vec<u8>>>>(idx)
+                    .map(|v| fmt::null_or_else(v, |arr| fmt::collection("bytea[]", arr.len())))
             }
+
+            // Custom and unknown types — use Kind metadata + RawText fallback
+            _ => Self::get_custom_value(row, idx, col_type),
         };
 
         result.unwrap_or_else(|_| format!("<{}>", col_type.name()))
+    }
+
+    /// Handle custom types (enums, domains, arrays of custom types, etc.)
+    /// by inspecting the type's Kind metadata and falling back to raw bytes.
+    fn get_custom_value(
+        row: &Row,
+        idx: usize,
+        col_type: &Type,
+    ) -> std::result::Result<String, tokio_postgres::Error> {
+        match col_type.kind() {
+            // Arrays of custom types (e.g. enum[], domain[])
+            Kind::Array(_) => row
+                .try_get::<_, Option<Vec<RawText>>>(idx)
+                .map(|v| fmt::null_or_else(v, |arr| fmt::pg_array(&arr))),
+
+            // Domain types wrap an underlying type — try RawText which reads
+            // the binary representation (same encoding as the base type)
+            Kind::Domain(_) | Kind::Enum(_) | Kind::Composite(_) | Kind::Range(_) => row
+                .try_get::<_, Option<RawText>>(idx)
+                .map(fmt::null_or),
+
+            // Any other unknown type
+            _ => row
+                .try_get::<_, Option<RawText>>(idx)
+                .map(fmt::null_or),
+        }
+    }
+}
+
+/// A wrapper that reads any PostgreSQL value as raw bytes and interprets it as text.
+///
+/// PostgreSQL enums, domains over text types, and many extension types transmit
+/// their values as UTF-8 strings even in the binary protocol. For types with true
+/// binary representations (e.g. numeric domains, geometric types), this falls back
+/// to hex display.
+struct RawText(String);
+
+impl std::fmt::Display for RawText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'a> FromSql<'a> for RawText {
+    fn from_sql(_ty: &Type, raw: &'a [u8]) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        match std::str::from_utf8(raw) {
+            Ok(s) => Ok(RawText(s.to_string())),
+            Err(_) => Ok(RawText(fmt::bytes(raw, 32))),
+        }
+    }
+
+    fn accepts(_ty: &Type) -> bool {
+        true
     }
 }

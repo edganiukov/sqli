@@ -403,30 +403,21 @@ impl NativeClient {
         Ok((columns, rows))
     }
 
-    /// Get a value from a column, handling different ClickHouse types
+    /// Get a value from a column, handling different ClickHouse types.
+    ///
+    /// Uses `Option<T>` for all reads which handles both nullable and non-nullable
+    /// columns uniformly — the clickhouse-rs `FromSql` for `Option<T>` returns
+    /// `Some(v)` for non-nullable columns and `None` for SQL NULLs.
     fn get_column_value(
         block: &Block<Complex>,
         row: usize,
         column: &str,
         sql_type: clickhouse_rs::types::SqlType,
     ) -> String {
-        use clickhouse_rs::types::SqlType;
+        use clickhouse_rs::types::{Enum16, Enum8, SqlType};
 
-        // Helper macro to try getting a value and converting to string
-        macro_rules! try_get {
-            ($t:ty) => {
-                if let Ok(v) = block.get::<$t, _>(row, column) {
-                    return v.to_string();
-                }
-            };
-            ($t:ty, $fmt:expr) => {
-                if let Ok(v) = block.get::<$t, _>(row, column) {
-                    return $fmt(v);
-                }
-            };
-        }
-
-        macro_rules! try_get_opt {
+        // Try getting Option<T> — works for both nullable and non-nullable columns
+        macro_rules! try_value {
             ($t:ty) => {
                 if let Ok(v) = block.get::<Option<$t>, _>(row, column) {
                     return fmt::null_or(v);
@@ -439,59 +430,70 @@ impl NativeClient {
             };
         }
 
-        // Formatters using shared format module
         let fmt_decimal = |d: Decimal| fmt::decimal(d.internal(), d.scale() as u32);
         let fmt_datetime = |dt: DateTime<Tz>| dt.format("%Y-%m-%d %H:%M:%S").to_string();
         let fmt_date = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
 
-        // Match on SQL type and try to extract appropriate type
-        match sql_type {
-            SqlType::UInt8 => try_get!(u8),
-            SqlType::UInt16 => try_get!(u16),
-            SqlType::UInt32 => try_get!(u32),
-            SqlType::UInt64 => try_get!(u64),
-            SqlType::Int8 => try_get!(i8),
-            SqlType::Int16 => try_get!(i16),
-            SqlType::Int32 => try_get!(i32),
-            SqlType::Int64 => try_get!(i64),
-            SqlType::Float32 => try_get!(f32),
-            SqlType::Float64 => try_get!(f64),
-            SqlType::String | SqlType::FixedString(_) => try_get!(String),
-            SqlType::Date => try_get!(NaiveDate, fmt_date),
-            SqlType::DateTime(_) => try_get!(DateTime<Tz>, fmt_datetime),
-            SqlType::Decimal(_, _) => try_get!(Decimal, fmt_decimal),
-            SqlType::Uuid | SqlType::Ipv4 | SqlType::Ipv6 => try_get!(String),
-            SqlType::Nullable(inner) => match *inner {
-                SqlType::UInt8 => try_get_opt!(u8),
-                SqlType::UInt16 => try_get_opt!(u16),
-                SqlType::UInt32 => try_get_opt!(u32),
-                SqlType::UInt64 => try_get_opt!(u64),
-                SqlType::Int8 => try_get_opt!(i8),
-                SqlType::Int16 => try_get_opt!(i16),
-                SqlType::Int32 => try_get_opt!(i32),
-                SqlType::Int64 => try_get_opt!(i64),
-                SqlType::Float32 => try_get_opt!(f32),
-                SqlType::Float64 => try_get_opt!(f64),
-                SqlType::String | SqlType::FixedString(_) => try_get_opt!(String),
-                SqlType::Date => try_get_opt!(NaiveDate, fmt_date),
-                SqlType::DateTime(_) => try_get_opt!(DateTime<Tz>, fmt_datetime),
-                SqlType::Decimal(_, _) => try_get_opt!(Decimal, fmt_decimal),
-                SqlType::Uuid | SqlType::Ipv4 | SqlType::Ipv6 => try_get_opt!(String),
-                _ => {}
-            },
+        // Unwrap Nullable to get the core data type — the Option<T> read
+        // handles NULL semantics for both nullable and non-nullable columns
+        let inner: &SqlType = match &sql_type {
+            SqlType::Nullable(inner) => inner,
+            other => other,
+        };
+
+        match inner {
+            SqlType::Bool => try_value!(bool),
+            SqlType::UInt8 => try_value!(u8),
+            SqlType::UInt16 => try_value!(u16),
+            SqlType::UInt32 => try_value!(u32),
+            SqlType::UInt64 => try_value!(u64),
+            SqlType::Int8 => try_value!(i8),
+            SqlType::Int16 => try_value!(i16),
+            SqlType::Int32 => try_value!(i32),
+            SqlType::Int64 => try_value!(i64),
+            SqlType::Float32 => try_value!(f32),
+            SqlType::Float64 => try_value!(f64),
+            SqlType::String | SqlType::FixedString(_) => try_value!(String),
+            SqlType::Date => try_value!(NaiveDate, fmt_date),
+            SqlType::DateTime(_) => try_value!(DateTime<Tz>, fmt_datetime),
+            SqlType::Decimal(_, _) => try_value!(Decimal, fmt_decimal),
+            SqlType::Uuid | SqlType::Ipv4 | SqlType::Ipv6 => try_value!(String),
+            SqlType::Enum8(variants) => {
+                if let Ok(v) = block.get::<Option<Enum8>, _>(row, column) {
+                    return match v {
+                        None => "NULL".to_string(),
+                        Some(e) => variants
+                            .iter()
+                            .find(|(_, val)| *val == e.internal())
+                            .map(|(name, _)| name.clone())
+                            .unwrap_or_else(|| e.to_string()),
+                    };
+                }
+            }
+            SqlType::Enum16(variants) => {
+                if let Ok(v) = block.get::<Option<Enum16>, _>(row, column) {
+                    return match v {
+                        None => "NULL".to_string(),
+                        Some(e) => variants
+                            .iter()
+                            .find(|(_, val)| *val == e.internal())
+                            .map(|(name, _)| name.clone())
+                            .unwrap_or_else(|| e.to_string()),
+                    };
+                }
+            }
             _ => {}
         }
 
         // Fallback: try common types in order of likelihood
-        try_get!(String);
-        try_get!(DateTime<Tz>, fmt_datetime);
-        try_get!(NaiveDate, fmt_date);
-        try_get!(Decimal, fmt_decimal);
-        try_get!(i64);
-        try_get!(u64);
-        try_get!(f64);
+        try_value!(String);
+        try_value!(DateTime<Tz>, fmt_datetime);
+        try_value!(NaiveDate, fmt_date);
+        try_value!(Decimal, fmt_decimal);
+        try_value!(i64);
+        try_value!(u64);
+        try_value!(f64);
 
-        // Ultimate fallback
         "<unsupported>".to_string()
     }
 }

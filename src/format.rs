@@ -143,6 +143,23 @@ pub fn collection(kind: &str, len: usize) -> String {
     format!("<{}: {} items>", kind, len)
 }
 
+/// Format a varint (big-endian signed bytes) as a decimal string.
+pub fn varint(bytes: &[u8]) -> String {
+    use num_bigint::BigInt;
+    BigInt::from_signed_bytes_be(bytes).to_string()
+}
+
+/// Format a slice as a PostgreSQL-style array literal: `{a,b,c}`.
+pub fn pg_array<T: ToString>(arr: &[T]) -> String {
+    format!(
+        "{{{}}}",
+        arr.iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

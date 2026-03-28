@@ -1,9 +1,10 @@
 use crate::db::QueryResult;
 use crate::error::Result;
 use crate::format as fmt;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use scylla::frame::response::result::CqlValue;
-use scylla::frame::value::{CqlDate, CqlDecimal, CqlTime, CqlTimestamp};
+use scylla::frame::value::{CqlDate, CqlDecimal, CqlDuration, CqlTime, CqlTimestamp};
 use scylla::{Session, SessionBuilder};
 use std::sync::Arc;
 
@@ -181,28 +182,88 @@ impl CassandraClient {
     fn format_column_value(value: &Option<CqlValue>) -> String {
         match value {
             None => "NULL".to_string(),
-            Some(v) => match v {
-                CqlValue::Ascii(s) | CqlValue::Text(s) => s.clone(),
-                CqlValue::Int(i) => i.to_string(),
-                CqlValue::BigInt(i) => i.to_string(),
-                CqlValue::Float(f) => f.to_string(),
-                CqlValue::Double(d) => d.to_string(),
-                CqlValue::Boolean(b) => b.to_string(),
-                CqlValue::Uuid(u) => u.to_string(),
-                CqlValue::SmallInt(i) => i.to_string(),
-                CqlValue::TinyInt(i) => i.to_string(),
-                CqlValue::Inet(addr) => addr.to_string(),
-                CqlValue::Varint(v) => format!("{:?}", v),
-                CqlValue::Timestamp(t) => Self::format_timestamp(t),
-                CqlValue::Date(d) => Self::format_date(d),
-                CqlValue::Time(t) => Self::format_time(t),
-                CqlValue::Decimal(d) => Self::format_decimal(d),
-                CqlValue::Blob(b) => fmt::collection("blob", b.len()),
-                CqlValue::List(l) => fmt::collection("list", l.len()),
-                CqlValue::Map(m) => fmt::collection("map", m.len()),
-                CqlValue::Set(s) => fmt::collection("set", s.len()),
-                _ => format!("{:?}", v),
-            },
+            Some(v) => Self::format_cql_value(v),
+        }
+    }
+
+    fn format_cql_value(v: &CqlValue) -> String {
+        match v {
+            CqlValue::Ascii(s) | CqlValue::Text(s) => s.clone(),
+            CqlValue::Int(i) => i.to_string(),
+            CqlValue::BigInt(i) => i.to_string(),
+            CqlValue::Float(f) => f.to_string(),
+            CqlValue::Double(d) => d.to_string(),
+            CqlValue::Boolean(b) => b.to_string(),
+            CqlValue::Uuid(u) => u.to_string(),
+            CqlValue::Timeuuid(u) => u.to_string(),
+            CqlValue::SmallInt(i) => i.to_string(),
+            CqlValue::TinyInt(i) => i.to_string(),
+            CqlValue::Counter(c) => c.0.to_string(),
+            CqlValue::Inet(addr) => addr.to_string(),
+            CqlValue::Varint(v) => fmt::varint(v.as_signed_bytes_be_slice()),
+            CqlValue::Duration(d) => Self::format_duration(d),
+            CqlValue::Timestamp(t) => Self::format_timestamp(t),
+            CqlValue::Date(d) => Self::format_date(d),
+            CqlValue::Time(t) => Self::format_time(t),
+            CqlValue::Decimal(d) => Self::format_decimal(d),
+            CqlValue::Blob(b) => fmt::bytes(b, 32),
+            CqlValue::Empty => "".to_string(),
+            CqlValue::List(l) => {
+                let items: Vec<String> = l.iter().map(Self::format_cql_value).collect();
+                format!("[{}]", items.join(","))
+            }
+            CqlValue::Set(s) => {
+                let items: Vec<String> = s.iter().map(Self::format_cql_value).collect();
+                format!("{{{}}}", items.join(","))
+            }
+            CqlValue::Map(m) => {
+                let entries: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| {
+                        format!("{}:{}", Self::format_cql_value(k), Self::format_cql_value(v))
+                    })
+                    .collect();
+                format!("{{{}}}", entries.join(","))
+            }
+            CqlValue::Tuple(t) => {
+                let items: Vec<String> = t
+                    .iter()
+                    .map(|v| match v {
+                        Some(val) => Self::format_cql_value(val),
+                        None => "NULL".to_string(),
+                    })
+                    .collect();
+                format!("({})", items.join(","))
+            }
+            _ => format!("{:?}", v),
+        }
+    }
+
+    fn format_duration(d: &CqlDuration) -> String {
+        let mut parts = Vec::new();
+        if d.months != 0 {
+            parts.push(format!("{}mo", d.months));
+        }
+        if d.days != 0 {
+            parts.push(format!("{}d", d.days));
+        }
+        if d.nanoseconds != 0 {
+            let total_us = d.nanoseconds.unsigned_abs();
+            let hours = total_us / 3_600_000_000_000;
+            let mins = (total_us % 3_600_000_000_000) / 60_000_000_000;
+            let secs = (total_us % 60_000_000_000) / 1_000_000_000;
+            let nanos = total_us % 1_000_000_000;
+            let neg = if d.nanoseconds < 0 { "-" } else { "" };
+            if nanos > 0 {
+                parts.push(format!("{}{}h{}m{}s{}ns", neg, hours, mins, secs, nanos));
+            } else {
+                parts.push(format!("{}{}h{}m{}s", neg, hours, mins, secs));
+            }
+        }
+        if parts.is_empty() {
+            "0s".to_string()
+        } else {
+            parts.join("")
         }
     }
 
