@@ -4,6 +4,7 @@ pub mod widgets;
 
 use crate::controller::{Controller, Focus, Mode, PopupState, ViewState};
 use crate::db::QueryResult;
+use crate::result_table::result_table_widths;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -546,21 +547,12 @@ impl App {
 
         let tab = self.controller.current_tab();
         let available_width = area.width as usize;
-        let min_col_width: usize = 12;
-        let max_col_width: usize = 50;
+        if available_width == 0 {
+            return;
+        }
 
-        // Calculate column widths based on content
-        let mut col_widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
-        for row in rows.iter() {
-            for (i, cell) in row.iter().enumerate() {
-                if i < col_widths.len() {
-                    col_widths[i] = col_widths[i].max(cell.len());
-                }
-            }
-        }
-        for w in col_widths.iter_mut() {
-            *w = (*w + 2).clamp(min_col_width, max_col_width);
-        }
+        // Prefer full text when possible, then shrink longest columns first.
+        let col_widths = result_table_widths(columns, rows, available_width);
 
         // Calculate horizontal scroll bounds
         let total_width: usize = col_widths.iter().sum();

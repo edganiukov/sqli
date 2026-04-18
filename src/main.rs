@@ -11,6 +11,7 @@ mod error;
 mod format;
 mod mysql;
 mod postgres;
+mod result_table;
 mod sqlite;
 mod ssh_sqlite;
 mod templates;

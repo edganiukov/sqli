@@ -1,4 +1,17 @@
 use super::{Controller, Focus, PopupState, QueryResult};
+use crate::result_table::result_table_widths;
+
+fn output_table_visible_width(term_width: usize, sidebar_hidden: bool) -> usize {
+    const SIDEBAR_WIDTH: usize = 40;
+    const SIDEBAR_HIDDEN_STRIP_WIDTH: usize = 1;
+    const OUTPUT_HORIZONTAL_PADDING: usize = 2;
+
+    if sidebar_hidden {
+        term_width.saturating_sub(SIDEBAR_HIDDEN_STRIP_WIDTH + OUTPUT_HORIZONTAL_PADDING)
+    } else {
+        term_width.saturating_sub(SIDEBAR_WIDTH + OUTPUT_HORIZONTAL_PADDING)
+    }
+}
 
 impl Controller {
     pub fn new_tab(&mut self) {
@@ -150,71 +163,40 @@ impl Controller {
 
     pub(super) fn move_column_to_end(&mut self) {
         let tab = self.current_tab();
+        let sidebar_hidden = tab.sidebar_hidden;
+        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+        let visible_width = output_table_visible_width(term_width, sidebar_hidden);
 
         let (total_width, max_col) = match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
-                const MIN_COL_WIDTH: usize = 12;
-                const MAX_COL_WIDTH: usize = 50;
-
-                let mut widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
-                for row in rows.iter() {
-                    for (i, cell) in row.iter().enumerate() {
-                        if i < widths.len() {
-                            widths[i] = widths[i].max(cell.len());
-                        }
-                    }
-                }
-                for w in widths.iter_mut() {
-                    *w = (*w + 2).clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
-                }
+                let widths = result_table_widths(columns, rows, visible_width);
                 let total: usize = widths.iter().sum();
                 (total, columns.len().saturating_sub(1))
             }
             _ => return,
         };
 
-        let sidebar_hidden = self.current_tab().sidebar_hidden;
         let tab = self.current_tab_mut();
         tab.result_selected_col = max_col;
-
-        // Calculate actual visible width from terminal size, minus sidebar when visible
-        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
-        const SIDEBAR_WIDTH: usize = 40;
-        let visible_width = if sidebar_hidden {
-            term_width
-        } else {
-            term_width.saturating_sub(SIDEBAR_WIDTH)
-        };
         tab.result_h_scroll = total_width.saturating_sub(visible_width);
     }
 
     pub(super) fn move_column(&mut self, delta: i32) {
         let tab = self.current_tab();
+        let sidebar_hidden = tab.sidebar_hidden;
+        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
+        let visible_width = output_table_visible_width(term_width, sidebar_hidden);
 
         // Get column info from query result
         let (col_widths, max_col) = match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
-                const MIN_COL_WIDTH: usize = 12;
-                const MAX_COL_WIDTH: usize = 50;
-
-                let mut widths: Vec<usize> = columns.iter().map(|h| h.len()).collect();
-                for row in rows.iter() {
-                    for (i, cell) in row.iter().enumerate() {
-                        if i < widths.len() {
-                            widths[i] = widths[i].max(cell.len());
-                        }
-                    }
-                }
-                for w in widths.iter_mut() {
-                    *w = (*w + 2).clamp(MIN_COL_WIDTH, MAX_COL_WIDTH);
-                }
+                let widths = result_table_widths(columns, rows, visible_width);
                 (widths, columns.len().saturating_sub(1))
             }
             _ => return,
         };
 
-        // Read sidebar_hidden before the mutable borrow
-        let sidebar_hidden = self.current_tab().sidebar_hidden;
+        let total_width: usize = col_widths.iter().sum();
         let tab = self.current_tab_mut();
 
         // Update selected column
@@ -222,6 +204,11 @@ impl Controller {
             tab.result_selected_col = (tab.result_selected_col + delta as usize).min(max_col);
         } else {
             tab.result_selected_col = tab.result_selected_col.saturating_sub((-delta) as usize);
+        }
+
+        if total_width <= visible_width {
+            tab.result_h_scroll = 0;
+            return;
         }
 
         // Calculate position of selected column
@@ -232,15 +219,6 @@ impl Controller {
                 .copied()
                 .unwrap_or(0);
 
-        // Calculate actual visible width from terminal size, minus sidebar when visible
-        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
-        const SIDEBAR_WIDTH: usize = 40;
-        let visible_width = if sidebar_hidden {
-            term_width
-        } else {
-            term_width.saturating_sub(SIDEBAR_WIDTH)
-        };
-
         if col_start < tab.result_h_scroll {
             // Column is to the left of viewport
             tab.result_h_scroll = col_start;
@@ -248,6 +226,9 @@ impl Controller {
             // Column is to the right of viewport
             tab.result_h_scroll = col_end.saturating_sub(visible_width);
         }
+
+        let max_scroll = total_width.saturating_sub(visible_width);
+        tab.result_h_scroll = tab.result_h_scroll.min(max_scroll);
     }
 
     /// Toggle cell visual selection (v) — selects cells in the current column
