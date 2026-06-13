@@ -866,26 +866,23 @@ impl Controller {
             // Clicked on sidebar
             self.current_tab_mut().focus = Focus::Sidebar;
 
-            // Calculate which table was clicked
-            // Layout: tab bar (1) + block title row (1) + "Tables" header (1) = 3 rows before first table
-            let table_count = self.current_tab().sidebar.tables.len();
-            let clicked_visual_row = y.saturating_sub(3) as usize;
+            // Calculate which table was clicked.
+            // Layout: tab bar (1) + block title row (1) = 2 rows before the list, whose
+            // first row is the "Tables" header. Reuse the exact scroll offset stored by
+            // the renderer so hit-testing matches what is on screen when scrolled.
+            let tab = self.current_tab();
+            let table_count = tab.sidebar.tables.len();
+            let scroll_offset = tab.sidebar.offset;
+            let clicked_row = y.saturating_sub(2) as usize + scroll_offset;
 
-            // Account for scroll offset in sidebar
-            // The sidebar scrolls when selected item is near bottom
-            let visible_height = term_size.1.saturating_sub(5) as usize; // approximate
-            let selected = self.current_tab().sidebar.selected + 1; // +1 for "Tables" header
-            let scroll_offset = if visible_height > 0 && selected >= visible_height {
-                selected - visible_height + 1
-            } else {
-                0
-            };
-
-            let clicked_index = clicked_visual_row + scroll_offset;
-            if clicked_index < table_count {
-                self.current_tab_mut().sidebar.selected = clicked_index;
-                if is_double_click {
-                    self.select_table();
+            // Row 0 of the list is the "Tables" header; tables start at row 1.
+            if clicked_row >= 1 {
+                let clicked_index = clicked_row - 1;
+                if clicked_index < table_count {
+                    self.current_tab_mut().sidebar.selected = clicked_index;
+                    if is_double_click {
+                        self.select_table();
+                    }
                 }
             }
         } else if y < 1 + query_height {

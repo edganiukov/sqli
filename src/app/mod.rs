@@ -404,18 +404,34 @@ impl App {
         self.draw_query_output(frame, right_chunks[1]);
     }
 
-    fn draw_sidebar(&self, frame: &mut Frame, area: Rect) {
+    fn draw_sidebar(&mut self, frame: &mut Frame, area: Rect) {
+        let is_focused = self.controller.current_tab().focus == Focus::Sidebar;
+        let table_count = self.controller.current_tab().sidebar.tables.len();
+
+        let title = if table_count > 0 {
+            format!("Explorer ({})", table_count)
+        } else {
+            "Explorer".to_string()
+        };
+        let block = panel_block(&title, is_focused, Borders::RIGHT);
+
+        // Sync the persisted scroll offset to the real viewport height so the
+        // selection stays visible and click hit-testing matches the screen.
+        let visible_height = block.inner(area).height as usize;
+        let offset = self
+            .controller
+            .current_tab_mut()
+            .sidebar
+            .scroll_to_selected(visible_height);
+
         let tab = self.controller.current_tab();
-        let is_focused = tab.focus == Focus::Sidebar;
+        let selected_row = tab.sidebar.selected_row();
 
-        let table_count = tab.sidebar.tables.len();
         let mut items: Vec<ListItem> = Vec::with_capacity(table_count + 1);
-
         items.push(ListItem::new(Line::from(vec![Span::styled(
             "Tables",
             accent_bold(),
         )])));
-
         for (i, table) in tab.sidebar.tables.iter().enumerate() {
             let is_last = i == table_count - 1;
             let prefix = if is_last { "└─ " } else { "├─ " };
@@ -424,13 +440,6 @@ impl App {
                 Span::styled(table, text()),
             ])));
         }
-
-        let title = if table_count > 0 {
-            format!("Explorer ({})", table_count)
-        } else {
-            "Explorer".to_string()
-        };
-        let block = panel_block(&title, is_focused, Borders::RIGHT);
 
         let list = List::new(items)
             .block(block)
@@ -442,15 +451,8 @@ impl App {
             .highlight_symbol(if is_focused { "> " } else { "  " });
 
         let mut list_state = ListState::default();
-        list_state.select(Some(tab.sidebar.selected + 1));
-
-        let visible_height = area.height.saturating_sub(2) as usize;
-        let selected = tab.sidebar.selected + 1;
-
-        if visible_height > 0 && selected >= visible_height {
-            let offset = selected - visible_height + 1;
-            *list_state.offset_mut() = offset;
-        }
+        list_state.select(Some(selected_row));
+        *list_state.offset_mut() = offset;
 
         frame.render_stateful_widget(list, area, &mut list_state);
     }
@@ -605,7 +607,7 @@ impl App {
                 let style = if col_idx == selected_col && is_focused {
                     Style::default()
                         .fg(ACCENT)
-                        .bg(HIGHLIGHT)
+                        .bg(COLUMN_HIGHLIGHT)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     bold(WARNING)
@@ -645,14 +647,13 @@ impl App {
                     .map(|(&col_idx, &w)| {
                         let cell_text = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
                         let display_text = truncate_str(cell_text, w.saturating_sub(1));
-                        let style = if is_line_visual && in_visual_range {
-                            Style::default().fg(TEXT).bg(BLUE)
-                        } else if is_cell_visual && in_visual_range && col_idx == selected_col {
-                            Style::default().fg(TEXT).bg(BLUE)
-                        } else if col_idx == selected_col && is_cursor_row {
-                            Style::default().fg(TEXT).bg(BLUE)
+                        let in_selection = (is_line_visual && in_visual_range)
+                            || (is_cell_visual && in_visual_range && col_idx == selected_col)
+                            || (col_idx == selected_col && is_cursor_row);
+                        let style = if in_selection {
+                            Style::default().fg(TEXT).bg(SELECTION)
                         } else if col_idx == selected_col && is_focused {
-                            Style::default().fg(TEXT).bg(HIGHLIGHT)
+                            Style::default().fg(TEXT).bg(COLUMN_HIGHLIGHT)
                         } else {
                             text()
                         };
@@ -661,7 +662,7 @@ impl App {
 
                 let row = Row::new(cells).height(1);
                 if is_line_visual && in_visual_range {
-                    row.style(Style::default().bg(BLUE))
+                    row.style(Style::default().bg(SELECTION))
                 } else if is_cursor_row {
                     row.style(Style::default().bg(HIGHLIGHT))
                 } else {

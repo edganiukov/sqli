@@ -1,15 +1,20 @@
 use ratatui::style::{Color, Modifier, Style};
 
 // Color scheme
-pub const ACCENT: Color = Color::Rgb(230, 150, 60); // Orange accent (Pi style)
-pub const BLUE: Color = Color::Rgb(100, 160, 220); // Bright blue
-pub const SUCCESS: Color = Color::Rgb(80, 200, 120); // Bright green
-pub const WARNING: Color = Color::Rgb(240, 180, 80); // Warm yellow
-pub const SURFACE: Color = Color::Rgb(20, 20, 24); // Dark background (focused)
-pub const SURFACE_DIM: Color = Color::Rgb(40, 40, 48); // Lighter (unfocused)
-pub const TEXT: Color = Color::Rgb(230, 230, 235); // Bright white text
-pub const TEXT_DIM: Color = Color::Rgb(130, 130, 140); // Dimmed text
-pub const HIGHLIGHT: Color = Color::Rgb(60, 60, 75); // Selection highlight
+pub const ACCENT: Color = Color::Rgb(235, 156, 66); // Orange accent (Pi style)
+pub const BLUE: Color = Color::Rgb(108, 166, 224); // Bright blue (focused border, hints)
+pub const SUCCESS: Color = Color::Rgb(118, 201, 139); // Bright green
+pub const WARNING: Color = Color::Rgb(228, 186, 96); // Warm yellow (header text)
+pub const SURFACE: Color = Color::Rgb(20, 21, 26); // Dark background (focused)
+pub const SURFACE_DIM: Color = Color::Rgb(38, 40, 48); // Lighter (unfocused, header, status)
+pub const TEXT: Color = Color::Rgb(228, 229, 235); // Bright white text
+pub const TEXT_DIM: Color = Color::Rgb(128, 132, 146); // Dimmed text
+
+// Selection layers, in increasing prominence. Kept visually distinct from each
+// other and from SURFACE_DIM so the focused column never reads as an idle pane.
+pub const HIGHLIGHT: Color = Color::Rgb(58, 60, 74); // List selection / cursor row band
+pub const COLUMN_HIGHLIGHT: Color = Color::Rgb(36, 52, 86); // Selected column band (cool blue)
+pub const SELECTION: Color = Color::Rgb(64, 104, 162); // Active cell / visual selection
 
 // Style helpers to reduce repetition
 pub fn dim() -> Style {

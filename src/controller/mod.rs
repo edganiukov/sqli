@@ -253,6 +253,44 @@ pub enum VisualSelect {
 pub struct SidebarState {
     pub tables: Vec<String>,
     pub selected: usize,
+    /// Scroll offset (first visible list row, including the "Tables" header) from the
+    /// last render. Persisted so click hit-testing matches what is on screen.
+    pub offset: usize,
+}
+
+impl SidebarState {
+    /// Total list rows, including the leading "Tables" header row.
+    pub fn item_count(&self) -> usize {
+        self.tables.len() + 1
+    }
+
+    /// List row index of the current selection (the "Tables" header occupies row 0).
+    pub fn selected_row(&self) -> usize {
+        self.selected + 1
+    }
+
+    /// Recompute the scroll offset so the selected row stays visible within
+    /// `visible_height` list rows, scrolling as little as possible. The result is
+    /// stored on `self.offset` and returned so the renderer and click hit-testing
+    /// agree on what is on screen.
+    pub fn scroll_to_selected(&mut self, visible_height: usize) -> usize {
+        if visible_height == 0 {
+            self.offset = 0;
+            return 0;
+        }
+
+        let selected = self.selected_row();
+        let mut offset = self.offset;
+        if selected < offset {
+            offset = selected;
+        } else if selected >= offset + visible_height {
+            offset = selected + 1 - visible_height;
+        }
+
+        let max_offset = self.item_count().saturating_sub(visible_height);
+        self.offset = offset.min(max_offset);
+        self.offset
+    }
 }
 
 pub struct Tab {
@@ -570,6 +608,7 @@ impl Controller {
                                 tab.db_client = Some(Arc::new(client));
                                 tab.sidebar.tables = tables;
                                 tab.sidebar.selected = 0;
+                                tab.sidebar.offset = 0;
                                 tab.status_message = None;
                                 tab.view_state = ViewState::DatabaseView;
                                 tab.focus = Focus::Query;
@@ -690,5 +729,58 @@ impl Controller {
         if current_tab_connected {
             self.current_tab_mut().query_textarea = TextArea::default();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SidebarState;
+
+    fn sidebar(table_count: usize, selected: usize, offset: usize) -> SidebarState {
+        SidebarState {
+            tables: (0..table_count).map(|i| format!("t{i}")).collect(),
+            selected,
+            offset,
+        }
+    }
+
+    #[test]
+    fn no_scroll_when_everything_fits() {
+        let mut s = sidebar(5, 4, 0);
+        // 5 tables + header = 6 rows, viewport of 10 rows shows them all.
+        assert_eq!(s.scroll_to_selected(10), 0);
+    }
+
+    #[test]
+    fn scrolls_to_keep_last_row_visible() {
+        let mut s = sidebar(20, 19, 0);
+        // 21 rows total, viewport of 10: last row (index 20) must be the bottom row.
+        let offset = s.scroll_to_selected(10);
+        assert_eq!(offset, 11);
+        assert_eq!(offset + 10, s.item_count());
+    }
+
+    #[test]
+    fn never_scrolls_past_the_end() {
+        // A stale large offset is clamped so trailing rows aren't left blank.
+        let mut s = sidebar(20, 19, 50);
+        assert_eq!(s.scroll_to_selected(10), 11);
+    }
+
+    #[test]
+    fn scrolls_up_minimally() {
+        let mut s = sidebar(20, 10, 11);
+        // selected row 11 is above the current top (11) edge boundary; pull it into view.
+        assert_eq!(s.scroll_to_selected(10), 11);
+
+        let mut s = sidebar(20, 5, 11);
+        // selected row 6 is above the viewport; it becomes the new top row.
+        assert_eq!(s.scroll_to_selected(10), 6);
+    }
+
+    #[test]
+    fn zero_height_resets_offset() {
+        let mut s = sidebar(20, 19, 7);
+        assert_eq!(s.scroll_to_selected(0), 0);
     }
 }
