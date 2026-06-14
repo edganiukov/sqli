@@ -7,6 +7,7 @@ mod templates;
 use crate::db::{DatabaseClient, QueryResult};
 use crate::error::Result;
 use crate::templates::{Template, TemplateStore};
+use ratatui::layout::Rect;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -32,6 +33,8 @@ pub enum PendingOperation {
     Query {
         receiver: oneshot::Receiver<Result<QueryResult>>,
         start: std::time::Instant,
+        /// Handle to the spawned task so the query can be aborted on cancel.
+        handle: tokio::task::JoinHandle<()>,
     },
     RefreshTables {
         receiver: oneshot::Receiver<Result<Vec<String>>>,
@@ -194,18 +197,32 @@ impl DatabaseConn {
         let (password, pwd_warning) = self.resolve_password();
         let client = match self.db_type {
             DatabaseType::Postgres => {
-                let client =
-                    PostgresClient::connect(&self.host, self.port, &self.user, &password, database)
-                        .await?;
+                let client = PostgresClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &password,
+                    database,
+                    self.readonly,
+                )
+                .await?;
                 DatabaseClient::Postgres(client)
             }
             DatabaseType::MySql => {
-                let client =
-                    MySqlClient::connect(&self.host, self.port, &self.user, &password, database)
-                        .await?;
+                let client = MySqlClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &password,
+                    database,
+                    self.readonly,
+                )
+                .await?;
                 DatabaseClient::MySql(client)
             }
             DatabaseType::Cassandra => {
+                // Cassandra/CQL has no read-only session mode; read-only access
+                // must be enforced via a read-only DB role/permissions.
                 let client = CassandraClient::connect(
                     &self.host, self.port, &self.user, &password, database,
                 )
@@ -218,7 +235,14 @@ impl DatabaseConn {
                     .as_ref()
                     .is_some_and(|p| p.eq_ignore_ascii_case("http"));
                 let client = ClickHouseClient::connect(
-                    &self.host, self.port, &self.user, &password, database, self.tls, use_http,
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    &password,
+                    database,
+                    self.tls,
+                    use_http,
+                    self.readonly,
                 )
                 .await?;
                 DatabaseClient::ClickHouse(client)
@@ -227,12 +251,17 @@ impl DatabaseConn {
                 let path = self.path.as_deref().unwrap_or_default();
                 if self.host.is_empty() {
                     // Local SQLite
-                    let client = crate::sqlite::SqliteClient::connect(path).await?;
+                    let client =
+                        crate::sqlite::SqliteClient::connect(path, self.readonly).await?;
                     DatabaseClient::Sqlite(client)
                 } else {
                     // Remote SQLite via SSH
-                    let client =
-                        crate::ssh_sqlite::SshSqliteClient::connect(&self.host, path).await?;
+                    let client = crate::ssh_sqlite::SshSqliteClient::connect(
+                        &self.host,
+                        path,
+                        self.readonly,
+                    )
+                    .await?;
                     DatabaseClient::SshSqlite(client)
                 }
             }
@@ -247,6 +276,52 @@ pub enum VisualSelect {
     Cell { anchor: usize },
     /// Select entire rows
     Line { anchor: usize },
+}
+
+/// On-screen placement of one visible result-table column, captured during render
+/// so mouse hit-testing (column resize) matches exactly what was drawn.
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnSegment {
+    /// Index into the full result column list.
+    pub index: usize,
+    /// Left screen x of the column.
+    pub x: u16,
+    /// Rendered (possibly clipped) width on screen.
+    pub width: u16,
+    /// Logical full width of the column (the resize baseline).
+    pub full_width: usize,
+}
+
+impl ColumnSegment {
+    /// Screen x of the column's right edge (the draggable boundary).
+    pub fn right_edge(&self) -> u16 {
+        self.x.saturating_add(self.width)
+    }
+}
+
+/// An in-progress column resize drag.
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnDrag {
+    pub col_index: usize,
+    pub start_x: u16,
+    pub start_width: usize,
+}
+
+/// Rectangles captured during the last DatabaseView render, so mouse hit-testing
+/// and page-size math read the exact same geometry the renderer used instead of
+/// re-deriving it from terminal size (which drifts and causes off-by-one bugs).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ViewLayout {
+    /// Sidebar pane outer area (None when the sidebar is hidden).
+    pub sidebar: Option<Rect>,
+    /// Sidebar list content area (inner of the panel block) for row hit-testing.
+    pub sidebar_list: Option<Rect>,
+    /// Query input pane outer area.
+    pub query: Option<Rect>,
+    /// Output pane outer area.
+    pub output: Option<Rect>,
+    /// Output table content area: header occupies the top row, data rows follow.
+    pub output_table: Option<Rect>,
 }
 
 #[derive(Debug, Default)]
@@ -314,6 +389,8 @@ pub struct Tab {
     pub result_cursor: usize,
     pub result_h_scroll: usize,
     pub result_selected_col: usize,
+    /// Manual per-column width overrides (column index -> width), set by mouse resize.
+    pub result_col_overrides: std::collections::HashMap<usize, usize>,
     pub pending_g: bool,
     pub visual_select: Option<VisualSelect>,
     pub status_message: Option<String>,
@@ -361,6 +438,7 @@ impl Tab {
             result_cursor: 0,
             result_h_scroll: 0,
             result_selected_col: 0,
+            result_col_overrides: std::collections::HashMap::new(),
             pending_g: false,
             visual_select: None,
             status_message: None,
@@ -470,6 +548,12 @@ pub struct Controller {
     pub spinner_state: usize,
     pub clipboard: Option<arboard::Clipboard>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
+    /// Geometry captured during the last DatabaseView render.
+    pub view_layout: ViewLayout,
+    /// Visible result-table column placements from the last render (for resize hit-testing).
+    pub result_columns: Vec<ColumnSegment>,
+    /// Active column resize drag, if the user is currently dragging a header border.
+    pub active_resize: Option<ColumnDrag>,
     /// Counter for generating unique tab IDs
     next_tab_id: usize,
 }
@@ -508,6 +592,9 @@ impl Controller {
             pending_ctrl_w: false,
             clipboard,
             last_click: None,
+            view_layout: ViewLayout::default(),
+            result_columns: Vec::new(),
+            active_resize: None,
             next_tab_id: 2,
         };
 
@@ -638,6 +725,7 @@ impl Controller {
                 PendingOperation::Query {
                     mut receiver,
                     start,
+                    handle,
                 } => match receiver.try_recv() {
                     Ok(result) => {
                         let elapsed = start.elapsed();
@@ -646,6 +734,7 @@ impl Controller {
                         tab.result_cursor = 0;
                         tab.result_h_scroll = 0;
                         tab.result_selected_col = 0;
+                        tab.result_col_overrides.clear();
                         tab.visual_select = None;
                         let timestamp = Local::now().format("%H:%M:%S");
 
@@ -688,7 +777,11 @@ impl Controller {
                         }
                     }
                     Err(oneshot::error::TryRecvError::Empty) => {
-                        tab.pending_operation = Some(PendingOperation::Query { receiver, start });
+                        tab.pending_operation = Some(PendingOperation::Query {
+                            receiver,
+                            start,
+                            handle,
+                        });
                     }
                     Err(oneshot::error::TryRecvError::Closed) => {
                         tab.loading = false;

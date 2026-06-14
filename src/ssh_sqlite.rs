@@ -13,18 +13,20 @@ pub struct SshSqliteClient {
     ssh_dest: String,
     ssh_port: Option<u16>,
     db_path: String,
+    readonly: bool,
 }
 
 impl SshSqliteClient {
     /// Connect to a remote SQLite database via SSH.
     /// `host` should be in format "user@hostname" or "user@hostname:port"
-    pub async fn connect(host: &str, db_path: &str) -> Result<Self> {
+    pub async fn connect(host: &str, db_path: &str, readonly: bool) -> Result<Self> {
         let (ssh_dest, ssh_port) = Self::parse_ssh_host(host)?;
 
         let client = Self {
             ssh_dest,
             ssh_port,
             db_path: db_path.to_string(),
+            readonly,
         };
 
         // Verify connectivity by checking if the database file exists
@@ -108,8 +110,14 @@ impl SshSqliteClient {
     async fn run_sqlite_query(&self, query: &str) -> Result<String> {
         let mut cmd = self.build_ssh_command();
 
-        // Build sqlite3 command with JSON output mode
-        let sqlite_cmd = format!("sqlite3 -json '{}'", self.db_path.replace("'", "'\\''"));
+        // Build sqlite3 command with JSON output mode. `-readonly` makes the
+        // sqlite3 CLI open the file read-only, so writes are rejected remotely.
+        let readonly_flag = if self.readonly { "-readonly " } else { "" };
+        let sqlite_cmd = format!(
+            "sqlite3 -json {}'{}'",
+            readonly_flag,
+            self.db_path.replace("'", "'\\''")
+        );
         cmd.arg(sqlite_cmd);
 
         cmd.stdin(Stdio::piped());

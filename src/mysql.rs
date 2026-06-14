@@ -15,8 +15,9 @@ impl MySqlClient {
         user: &str,
         password: &str,
         database: &str,
+        readonly: bool,
     ) -> Result<Self> {
-        let opts = OptsBuilder::default()
+        let mut opts = OptsBuilder::default()
             .ip_or_hostname(host)
             .tcp_port(port)
             .user(Some(user))
@@ -26,6 +27,12 @@ impl MySqlClient {
             } else {
                 Some(database)
             });
+
+        // Run on every pooled connection so the read-only mode is enforced
+        // server-side regardless of which connection serves a query.
+        if readonly {
+            opts = opts.init(vec!["SET SESSION TRANSACTION READ ONLY"]);
+        }
 
         let pool = Pool::new(Opts::from(opts));
 

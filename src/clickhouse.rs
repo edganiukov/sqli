@@ -21,6 +21,7 @@ pub struct HttpClient {
     user: String,
     password: String,
     database: String,
+    readonly: bool,
 }
 
 /// Native protocol client using clickhouse-rs
@@ -41,6 +42,7 @@ struct ColumnMeta {
 }
 
 impl ClickHouseClient {
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect(
         host: &str,
         port: u16,
@@ -49,12 +51,15 @@ impl ClickHouseClient {
         database: &str,
         tls: bool,
         use_http: bool,
+        readonly: bool,
     ) -> Result<Self> {
         if use_http {
-            let client = HttpClient::connect(host, port, user, password, database, tls).await?;
+            let client =
+                HttpClient::connect(host, port, user, password, database, tls, readonly).await?;
             Ok(ClickHouseClient::Http(client))
         } else {
-            let client = NativeClient::connect(host, port, user, password, database, tls).await?;
+            let client =
+                NativeClient::connect(host, port, user, password, database, tls, readonly).await?;
             Ok(ClickHouseClient::Native(client))
         }
     }
@@ -111,6 +116,7 @@ impl HttpClient {
         password: &str,
         database: &str,
         tls: bool,
+        readonly: bool,
     ) -> Result<Self> {
         let client = Client::new();
         let scheme = if tls { "https" } else { "http" };
@@ -122,6 +128,7 @@ impl HttpClient {
             user: user.to_string(),
             password: password.to_string(),
             database: database.to_string(),
+            readonly,
         };
 
         // Test connection
@@ -136,6 +143,11 @@ impl HttpClient {
             .post(&self.base_url)
             .query(&[("database", &self.database)])
             .body(query.to_string());
+
+        // `readonly=1` restricts the session to read-only queries server-side.
+        if self.readonly {
+            request = request.query(&[("readonly", "1")]);
+        }
 
         if !self.user.is_empty() {
             request = request.header("X-ClickHouse-User", &self.user);
@@ -274,14 +286,21 @@ impl NativeClient {
         password: &str,
         database: &str,
         _tls: bool, // TLS not yet supported in clickhouse-rs
+        readonly: bool,
     ) -> Result<Self> {
         // Build connection URL for native protocol
         // Format: tcp://user:password@host:port/database
-        let url = if password.is_empty() {
+        let mut url = if password.is_empty() {
             format!("tcp://{}@{}:{}/{}", user, host, port, database)
         } else {
             format!("tcp://{}:{}@{}:{}/{}", user, password, host, port, database)
         };
+
+        // `readonly=1` is a clickhouse-rs connection option restricting the
+        // session to read-only queries (only read data queries allowed).
+        if readonly {
+            url.push_str("?readonly=1");
+        }
 
         let pool = Pool::new(url);
 

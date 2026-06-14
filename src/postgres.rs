@@ -19,6 +19,7 @@ impl PostgresClient {
         user: &str,
         password: &str,
         database: &str,
+        readonly: bool,
     ) -> Result<Self> {
         crate::debug_log!(
             "Postgres connecting to {}:{} database='{}' user='{}'",
@@ -39,6 +40,14 @@ impl PostgresClient {
                 crate::debug_log!("Postgres connection error: {}", e);
             }
         });
+
+        // Enforce read-only at the session level so writes are rejected by the
+        // server, not just by the client-side statement heuristic.
+        if readonly {
+            client
+                .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+                .await?;
+        }
 
         Ok(Self { client })
     }

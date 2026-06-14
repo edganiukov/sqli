@@ -4,8 +4,8 @@ use crate::error::{Result, SqliError};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use rusqlite::Connection;
 use rusqlite::types::Value;
+use rusqlite::{Connection, OpenFlags};
 
 pub struct SqliteClient {
     conn: Mutex<Connection>,
@@ -13,8 +13,22 @@ pub struct SqliteClient {
 }
 
 impl SqliteClient {
-    pub async fn connect(path: &str) -> Result<Self> {
+    pub async fn connect(path: &str, readonly: bool) -> Result<Self> {
         let path = PathBuf::from(path);
+
+        if readonly {
+            // Open the file read-only so the engine itself rejects any write.
+            let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+            let conn = Connection::open_with_flags(&path, flags)
+                .map_err(|e| SqliError::Connection(format!("SQLite: {}", e)))?;
+            // WAL setup is skipped: changing journal_mode requires write access.
+            return Ok(Self {
+                conn: Mutex::new(conn),
+                path,
+            });
+        }
 
         let conn =
             Connection::open(&path).map_err(|e| SqliError::Connection(format!("SQLite: {}", e)))?;

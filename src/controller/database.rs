@@ -470,13 +470,13 @@ impl Controller {
         {
             let tab = self.current_tab_mut();
             tab.loading = true;
-            tab.status_message = Some("Executing...".to_string());
+            tab.status_message = Some("Executing... (Esc to cancel)".to_string());
         }
 
         let start = std::time::Instant::now();
 
         let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
+        let handle = self.runtime.spawn(async move {
             let result = Self::execute_statements(&client, statements).await;
             let _ = tx.send(result);
         });
@@ -484,6 +484,7 @@ impl Controller {
         self.current_tab_mut().pending_operation = Some(PendingOperation::Query {
             receiver: rx,
             start,
+            handle,
         });
     }
 
