@@ -2,9 +2,9 @@ mod popups;
 pub mod theme;
 pub mod widgets;
 
-use crate::controller::{Controller, Focus, Mode, PopupState, ViewState};
+use crate::controller::{ColumnSegment, Controller, Focus, Mode, PopupState, ViewState};
 use crate::db::QueryResult;
-use crate::result_table::result_table_widths;
+use crate::result_table::result_table_widths_with_overrides;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -385,13 +385,17 @@ impl App {
                     .style(Style::default().bg(SURFACE_DIM)),
                 cols[0],
             );
+            self.controller.view_layout.sidebar = None;
+            self.controller.view_layout.sidebar_list = None;
             cols[1]
         } else {
             let main_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(40), Constraint::Min(1)])
                 .split(area);
-            self.draw_sidebar(frame, main_chunks[0]);
+            let sidebar_area = main_chunks[0];
+            self.draw_sidebar(frame, sidebar_area);
+            self.controller.view_layout.sidebar = Some(sidebar_area);
             main_chunks[1]
         };
 
@@ -399,9 +403,14 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
             .split(right_area);
+        let query_area = right_chunks[0];
+        let output_area = right_chunks[1];
 
-        self.draw_query_input(frame, right_chunks[0]);
-        self.draw_query_output(frame, right_chunks[1]);
+        self.controller.view_layout.query = Some(query_area);
+        self.controller.view_layout.output = Some(output_area);
+
+        self.draw_query_input(frame, query_area);
+        self.draw_query_output(frame, output_area);
     }
 
     fn draw_sidebar(&mut self, frame: &mut Frame, area: Rect) {
@@ -417,12 +426,13 @@ impl App {
 
         // Sync the persisted scroll offset to the real viewport height so the
         // selection stays visible and click hit-testing matches the screen.
-        let visible_height = block.inner(area).height as usize;
+        let list_inner = block.inner(area);
+        self.controller.view_layout.sidebar_list = Some(list_inner);
         let offset = self
             .controller
             .current_tab_mut()
             .sidebar
-            .scroll_to_selected(visible_height);
+            .scroll_to_selected(list_inner.height as usize);
 
         let tab = self.controller.current_tab();
         let selected_row = tab.sidebar.selected_row();
@@ -479,7 +489,7 @@ impl App {
         frame.render_widget(&tab.query_textarea, area);
     }
 
-    fn draw_query_output(&self, frame: &mut Frame, area: Rect) {
+    fn draw_query_output(&mut self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let is_focused = tab.focus == Focus::Output;
         let (_, bg_color) = focus_colors(is_focused);
@@ -510,10 +520,13 @@ impl App {
             width: inner_area.width.saturating_sub(2),
             height: inner_area.height,
         };
+        self.controller.view_layout.output_table = Some(padded_area);
 
-        match &tab.query_result {
+        let mut segments = Vec::new();
+        match &self.controller.current_tab().query_result {
             Some(QueryResult::Select { columns, rows }) => {
-                self.draw_result_table(frame, padded_area, columns, rows, is_focused, bg_color);
+                segments =
+                    self.draw_result_table(frame, padded_area, columns, rows, is_focused, bg_color);
             }
             Some(QueryResult::Execute { rows_affected }) => {
                 let msg = Paragraph::new(format!("{} row(s) affected", rows_affected))
@@ -530,6 +543,7 @@ impl App {
                 frame.render_widget(msg, padded_area);
             }
         }
+        self.controller.result_columns = segments;
     }
 
     fn draw_result_table(
@@ -540,21 +554,26 @@ impl App {
         rows: &[Vec<String>],
         is_focused: bool,
         bg_color: ratatui::style::Color,
-    ) {
+    ) -> Vec<ColumnSegment> {
         if columns.is_empty() {
             let msg = Paragraph::new("No results").style(dim().bg(bg_color));
             frame.render_widget(msg, area);
-            return;
+            return Vec::new();
         }
 
         let tab = self.controller.current_tab();
         let available_width = area.width as usize;
         if available_width == 0 {
-            return;
+            return Vec::new();
         }
 
-        // Prefer full text when possible, then shrink longest columns first.
-        let col_widths = result_table_widths(columns, rows, available_width);
+        // Auto-fit widths, then apply any manual resize overrides.
+        let col_widths = result_table_widths_with_overrides(
+            columns,
+            rows,
+            available_width,
+            &tab.result_col_overrides,
+        );
 
         // Calculate horizontal scroll bounds
         let total_width: usize = col_widths.iter().sum();
@@ -594,6 +613,20 @@ impl App {
             visible_col_widths.push(col_w);
             visible_col_indices.push(i);
             remaining_width = remaining_width.saturating_sub(col_w);
+        }
+
+        // Record where each visible column landed on screen so mouse hit-testing
+        // (column resize) reads the exact rendered geometry.
+        let mut segments = Vec::with_capacity(visible_col_indices.len());
+        let mut seg_x = area.x;
+        for (&col_idx, &rendered_w) in visible_col_indices.iter().zip(visible_col_widths.iter()) {
+            segments.push(ColumnSegment {
+                index: col_idx,
+                x: seg_x,
+                width: rendered_w as u16,
+                full_width: col_widths[col_idx],
+            });
+            seg_x = seg_x.saturating_add(rendered_w as u16);
         }
 
         let selected_col = tab.result_selected_col;
@@ -675,11 +708,17 @@ impl App {
             .map(|&w| Constraint::Length(w as u16))
             .collect();
 
+        // No inter-column spacing: column widths already include padding, and a zero
+        // gap keeps the rendered layout identical to the contiguous width math above,
+        // so header-border resize hit-testing lines up exactly with what's drawn.
         let table = Table::new(visible_rows, widths)
             .header(header)
+            .column_spacing(0)
             .style(Style::default().bg(bg_color));
 
         frame.render_widget(table, area);
+
+        segments
     }
 
     fn draw_popup(&self, frame: &mut Frame) {

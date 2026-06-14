@@ -1,19 +1,25 @@
 use super::{Controller, Focus, PopupState, QueryResult};
-use crate::result_table::result_table_widths;
-
-fn output_table_visible_width(term_width: usize, sidebar_hidden: bool) -> usize {
-    const SIDEBAR_WIDTH: usize = 40;
-    const SIDEBAR_HIDDEN_STRIP_WIDTH: usize = 1;
-    const OUTPUT_HORIZONTAL_PADDING: usize = 2;
-
-    if sidebar_hidden {
-        term_width.saturating_sub(SIDEBAR_HIDDEN_STRIP_WIDTH + OUTPUT_HORIZONTAL_PADDING)
-    } else {
-        term_width.saturating_sub(SIDEBAR_WIDTH + OUTPUT_HORIZONTAL_PADDING)
-    }
-}
+use crate::result_table::result_table_widths_with_overrides;
 
 impl Controller {
+    /// Number of data rows visible in the result table (excludes the header row),
+    /// taken from the last rendered output geometry.
+    pub(super) fn output_visible_rows(&self) -> usize {
+        self.view_layout
+            .output_table
+            .map(|r| r.height.saturating_sub(1) as usize)
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    /// Width available to the result table content, from the last rendered geometry.
+    pub(super) fn output_visible_width(&self) -> usize {
+        self.view_layout
+            .output_table
+            .map(|r| r.width as usize)
+            .unwrap_or(0)
+    }
+
     pub fn new_tab(&mut self) {
         // Clone connections from first tab for now
         let connections = self.tabs[0].connections.clone();
@@ -108,15 +114,12 @@ impl Controller {
     }
 
     pub(super) fn scroll_to_end(&mut self) {
+        let visible_height = self.output_visible_rows();
         let tab = self.current_tab_mut();
         if let Some(QueryResult::Select { rows, .. }) = &tab.query_result {
             let max_cursor = rows.len().saturating_sub(1);
             tab.result_cursor = max_cursor;
-            // Compute visible height to position scroll so last row is at bottom
-            let term_size = crossterm::terminal::size().unwrap_or((80, 24));
-            let main_area_height = term_size.1.saturating_sub(3);
-            let output_height = main_area_height * 65 / 100;
-            let visible_height = output_height.saturating_sub(3).max(1) as usize;
+            // Position scroll so the last row sits at the bottom of the viewport.
             tab.result_scroll = max_cursor.saturating_sub(visible_height.saturating_sub(1));
         }
     }
@@ -162,14 +165,17 @@ impl Controller {
     }
 
     pub(super) fn move_column_to_end(&mut self) {
+        let visible_width = self.output_visible_width();
         let tab = self.current_tab();
-        let sidebar_hidden = tab.sidebar_hidden;
-        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
-        let visible_width = output_table_visible_width(term_width, sidebar_hidden);
 
         let (total_width, max_col) = match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
-                let widths = result_table_widths(columns, rows, visible_width);
+                let widths = result_table_widths_with_overrides(
+                    columns,
+                    rows,
+                    visible_width,
+                    &tab.result_col_overrides,
+                );
                 let total: usize = widths.iter().sum();
                 (total, columns.len().saturating_sub(1))
             }
@@ -182,15 +188,18 @@ impl Controller {
     }
 
     pub(super) fn move_column(&mut self, delta: i32) {
+        let visible_width = self.output_visible_width();
         let tab = self.current_tab();
-        let sidebar_hidden = tab.sidebar_hidden;
-        let term_width = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
-        let visible_width = output_table_visible_width(term_width, sidebar_hidden);
 
         // Get column info from query result
         let (col_widths, max_col) = match &tab.query_result {
             Some(QueryResult::Select { columns, rows }) => {
-                let widths = result_table_widths(columns, rows, visible_width);
+                let widths = result_table_widths_with_overrides(
+                    columns,
+                    rows,
+                    visible_width,
+                    &tab.result_col_overrides,
+                );
                 (widths, columns.len().saturating_sub(1))
             }
             _ => return,

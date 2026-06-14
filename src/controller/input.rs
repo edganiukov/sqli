@@ -80,7 +80,15 @@ impl Controller {
 
         tab.loading = false;
         tab.pending_g = false;
-        tab.status_message = Some("Cancelled".to_string());
+
+        // Abort the spawned task so a long-running query stops instead of
+        // running to completion in the background after the UI moves on.
+        if let super::PendingOperation::Query { handle, .. } = &op {
+            handle.abort();
+            tab.status_message = Some("Query cancelled".to_string());
+        } else {
+            tab.status_message = Some("Cancelled".to_string());
+        }
 
         // Reset view state for connection operations
         if matches!(
@@ -480,14 +488,8 @@ impl Controller {
             return;
         }
 
-        // Calculate actual visible height based on terminal size
-        // Must match the rendering calculation in app.rs draw_query_output
-        let term_size = crossterm::terminal::size().unwrap_or((80, 24));
-        let main_area_height = term_size.1.saturating_sub(3); // minus tab bar, status, command
-        // Output area is 65% of main area (query is 35%)
-        let output_height = main_area_height * 65 / 100;
-        // Subtract: 1 for title, 1 for header row, 1 extra for rounding safety
-        let visible_height = output_height.saturating_sub(3).max(1) as usize;
+        // Visible data rows from the last rendered output geometry.
+        let visible_height = self.output_visible_rows();
 
         let tab = self.current_tab_mut();
 
@@ -638,8 +640,14 @@ impl Controller {
     }
 
     pub fn handle_mouse(&mut self, event: MouseEvent) {
-        // Block all mouse interaction when a popup is active
+        // While a popup is open it stays keyboard-driven, but the wheel still scrolls
+        // it (mirroring the arrow keys) so scrolling works the same way everywhere.
         if !matches!(self.popup_state, PopupState::None) {
+            match event.kind {
+                MouseEventKind::ScrollUp => self.scroll_active_popup(true),
+                MouseEventKind::ScrollDown => self.scroll_active_popup(false),
+                _ => {}
+            }
             return;
         }
 
@@ -664,8 +672,38 @@ impl Controller {
             return;
         }
 
+        // Horizontal wheel / trackpad pans the wide result table.
+        if matches!(
+            event.kind,
+            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight
+        ) {
+            let scroll_right = matches!(event.kind, MouseEventKind::ScrollRight);
+            self.handle_mouse_hscroll(x, y, scroll_right);
+            return;
+        }
+
+        // Continue or finish an in-progress column resize drag.
+        if self.active_resize.is_some() {
+            match event.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.update_column_resize(x);
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.active_resize = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Only handle left button clicks for the rest
         if !matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+
+        // Grabbing a result column's header border starts a resize instead of a click.
+        if self.try_start_column_resize(x, y) {
             return;
         }
 
@@ -703,7 +741,95 @@ impl Controller {
         }
     }
 
-    fn handle_mouse_scroll(&mut self, x: u16, _y: u16, scroll_up: bool, term_size: (u16, u16)) {
+    /// If the cursor sits on a result column's header border, begin a resize drag.
+    /// Returns true when a resize was started. Only the header row acts as a handle,
+    /// so dragging never interferes with row/cell selection in the data area.
+    fn try_start_column_resize(&mut self, x: u16, y: u16) -> bool {
+        if self.current_tab().view_state != ViewState::DatabaseView {
+            return false;
+        }
+        let Some(table) = self.view_layout.output_table else {
+            return false;
+        };
+        if y != table.y {
+            return false;
+        }
+
+        let grabbed = self.result_columns.iter().copied().find(|seg| {
+            let right = seg.right_edge();
+            x >= seg.x && (x == right || (right >= 1 && x == right - 1))
+        });
+
+        let Some(seg) = grabbed else {
+            return false;
+        };
+
+        self.current_tab_mut().focus = Focus::Output;
+        self.active_resize = Some(super::ColumnDrag {
+            col_index: seg.index,
+            start_x: x,
+            start_width: seg.full_width,
+        });
+        true
+    }
+
+    /// Apply an in-progress resize: width tracks the cursor relative to where the
+    /// drag began, clamped to a readable range.
+    fn update_column_resize(&mut self, x: u16) {
+        const MIN_WIDTH: i32 = 3;
+        const MAX_WIDTH: i32 = 240;
+
+        let Some(drag) = self.active_resize else {
+            return;
+        };
+        let delta = x as i32 - drag.start_x as i32;
+        let new_width = (drag.start_width as i32 + delta).clamp(MIN_WIDTH, MAX_WIDTH) as usize;
+        self.current_tab_mut()
+            .result_col_overrides
+            .insert(drag.col_index, new_width);
+    }
+
+    /// Route a wheel notch to the open popup as the equivalent arrow key, so the
+    /// wheel scrolls/moves selection identically to the keyboard in every popup.
+    fn scroll_active_popup(&mut self, scroll_up: bool) {
+        let code = if scroll_up {
+            KeyCode::Up
+        } else {
+            KeyCode::Down
+        };
+        if matches!(self.popup_state, PopupState::Help { .. }) {
+            self.handle_help_popup_keys(code);
+        } else if matches!(self.popup_state, PopupState::RecordDetail { .. }) {
+            self.handle_output_keys(code);
+        } else if matches!(
+            self.popup_state,
+            PopupState::TemplateList { .. } | PopupState::Completion { .. }
+        ) {
+            self.handle_popup_keys(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+    }
+
+    /// Horizontal wheel over the result table pans columns, reusing the keyboard
+    /// column-move logic (which keeps the selected column and h-scroll in sync).
+    fn handle_mouse_hscroll(&mut self, x: u16, y: u16, scroll_right: bool) {
+        if self.current_tab().view_state != ViewState::DatabaseView {
+            return;
+        }
+        let over_output = self
+            .view_layout
+            .output
+            .is_some_and(|r| rect_contains(r, x, y));
+        if !over_output {
+            return;
+        }
+        if scroll_right {
+            self.move_column(1);
+        } else {
+            self.move_column(-1);
+        }
+    }
+
+    fn handle_mouse_scroll(&mut self, x: u16, y: u16, scroll_up: bool, _term_size: (u16, u16)) {
         let view_state = self.current_tab().view_state;
         const SCROLL_AMOUNT: usize = 3;
 
@@ -733,29 +859,37 @@ impl Controller {
                 }
             }
             ViewState::DatabaseView => {
-                const SIDEBAR_WIDTH: u16 = 40;
-                let main_area_height = term_size.1 - 3;
-                let query_height = main_area_height * 35 / 100;
-                let sidebar_hidden = self.current_tab().sidebar_hidden;
+                // Scroll the pane actually under the cursor, so hovering the query
+                // editor no longer scrolls the results by mistake.
+                let layout = self.view_layout;
+                let over = |rect: Option<ratatui::layout::Rect>| {
+                    rect.is_some_and(|r| rect_contains(r, x, y))
+                };
 
-                if !sidebar_hidden && x < SIDEBAR_WIDTH {
-                    // Scroll in sidebar
+                if over(layout.sidebar) {
                     let tab = self.current_tab_mut();
                     let table_count = tab.sidebar.tables.len();
                     if table_count == 0 {
                         return;
                     }
-
                     if scroll_up {
                         tab.sidebar.selected = tab.sidebar.selected.saturating_sub(SCROLL_AMOUNT);
                     } else {
                         tab.sidebar.selected =
                             (tab.sidebar.selected + SCROLL_AMOUNT).min(table_count - 1);
                     }
-                } else {
-                    // Scroll in output area
-                    let visible_height = (term_size.1 - 3 - query_height) as usize;
-
+                } else if over(layout.query) {
+                    use tui_textarea::Scrolling;
+                    let rows = if scroll_up {
+                        -(SCROLL_AMOUNT as i16)
+                    } else {
+                        SCROLL_AMOUNT as i16
+                    };
+                    self.current_tab_mut()
+                        .query_textarea
+                        .scroll(Scrolling::Delta { rows, cols: 0 });
+                } else if over(layout.output) {
+                    let visible_height = self.output_visible_rows();
                     if scroll_up {
                         self.move_cursor(-(SCROLL_AMOUNT as i32), visible_height);
                     } else {
@@ -854,88 +988,76 @@ impl Controller {
         &mut self,
         x: u16,
         y: u16,
-        term_size: (u16, u16),
+        _term_size: (u16, u16),
         is_double_click: bool,
     ) {
-        const SIDEBAR_WIDTH: u16 = 40;
-        let main_area_height = term_size.1 - 3; // minus tab bar, status, command
-        let query_height = main_area_height * 35 / 100;
-        let sidebar_hidden = self.current_tab().sidebar_hidden;
+        let layout = self.view_layout;
 
-        if !sidebar_hidden && x < SIDEBAR_WIDTH {
-            // Clicked on sidebar
+        // Sidebar: map the click to a table via the rendered list rect + scroll offset.
+        if let Some(rect) = layout.sidebar
+            && rect_contains(rect, x, y)
+        {
             self.current_tab_mut().focus = Focus::Sidebar;
 
-            // Calculate which table was clicked.
-            // Layout: tab bar (1) + block title row (1) = 2 rows before the list, whose
-            // first row is the "Tables" header. Reuse the exact scroll offset stored by
-            // the renderer so hit-testing matches what is on screen when scrolled.
-            let tab = self.current_tab();
-            let table_count = tab.sidebar.tables.len();
-            let scroll_offset = tab.sidebar.offset;
-            let clicked_row = y.saturating_sub(2) as usize + scroll_offset;
-
-            // Row 0 of the list is the "Tables" header; tables start at row 1.
-            if clicked_row >= 1 {
-                let clicked_index = clicked_row - 1;
-                if clicked_index < table_count {
-                    self.current_tab_mut().sidebar.selected = clicked_index;
-                    if is_double_click {
-                        self.select_table();
+            if let Some(list) = layout.sidebar_list
+                && rect_contains(list, x, y)
+            {
+                let tab = self.current_tab();
+                let table_count = tab.sidebar.tables.len();
+                // List row 0 is the "Tables" header; tables follow at row >= 1.
+                let list_row = (y - list.y) as usize + tab.sidebar.offset;
+                if list_row >= 1 {
+                    let clicked_index = list_row - 1;
+                    if clicked_index < table_count {
+                        self.current_tab_mut().sidebar.selected = clicked_index;
+                        if is_double_click {
+                            self.select_table();
+                        }
                     }
                 }
             }
-        } else if y < 1 + query_height {
-            // Clicked on query area
+            return;
+        }
+
+        // Query pane: focus only.
+        if let Some(rect) = layout.query
+            && rect_contains(rect, x, y)
+        {
             self.current_tab_mut().focus = Focus::Query;
-        } else {
-            // Clicked on output area
+            return;
+        }
+
+        // Output pane: focus, and map the click to a result row when it lands on one.
+        if let Some(rect) = layout.output
+            && rect_contains(rect, x, y)
+        {
             self.current_tab_mut().focus = Focus::Output;
 
-            // Calculate which row was clicked
-            // Output area starts after: tab bar (1) + query area (query_height)
-            // Inside output: panel title (1), table header row (1), then data rows
-            // macOS always needs +3 offset; Linux needs +3 only when rows overflow
-            let data_y_start = 1 + query_height + 2;
-            // #[cfg(target_os = "macos")]
-            // let data_y_start = 1 + query_height + 3;
-
-            // #[cfg(not(target_os = "macos"))]
-            // let data_y_start = {
-            //     let output_height = main_area_height * 65 / 100;
-            //     let visible_height = output_height.saturating_sub(2) as usize;
-            //     let row_count = self.current_tab().query_result.as_ref().map_or(0, |r| {
-            //         if let crate::db::QueryResult::Select { rows, .. } = r {
-            //             rows.len()
-            //         } else {
-            //             0
-            //         }
-            //     });
-            //     if row_count > visible_height {
-            //         1 + query_height + 3
-            //     } else {
-            //         1 + query_height + 2
-            //     }
-            // };
-            if y < data_y_start {
-                return;
-            }
-            let clicked_row = (y - data_y_start) as usize;
-
             let mut clicked_valid_row = false;
-            let tab = self.current_tab_mut();
-            if let Some(crate::db::QueryResult::Select { rows, .. }) = &tab.query_result {
-                let actual_row = tab.result_scroll + clicked_row;
-                if actual_row < rows.len() {
-                    tab.result_cursor = actual_row;
-                    clicked_valid_row = true;
+            if let Some(table) = layout.output_table
+                && rect_contains(table, x, y)
+                && y > table.y
+            {
+                // Header occupies table.y; data rows start at table.y + 1.
+                let clicked_row = (y - table.y - 1) as usize;
+                let tab = self.current_tab_mut();
+                if let Some(crate::db::QueryResult::Select { rows, .. }) = &tab.query_result {
+                    let actual_row = tab.result_scroll + clicked_row;
+                    if actual_row < rows.len() {
+                        tab.result_cursor = actual_row;
+                        clicked_valid_row = true;
+                    }
                 }
             }
 
-            // Open record detail popup on double-click
             if is_double_click && clicked_valid_row {
                 self.open_record_detail();
             }
         }
     }
+}
+
+/// Whether the point `(x, y)` falls inside `rect`.
+fn rect_contains(rect: ratatui::layout::Rect, x: u16, y: u16) -> bool {
+    x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
 }
