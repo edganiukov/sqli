@@ -12,9 +12,11 @@ mod format;
 mod mysql;
 mod postgres;
 mod result_table;
+mod session;
 mod sqlite;
 mod ssh_sqlite;
 mod templates;
+mod terminal;
 
 use std::io;
 use std::path::PathBuf;
@@ -23,14 +25,7 @@ use app::App;
 use clap::Parser;
 use controller::Controller;
 
-use crossterm::ExecutableCommand;
-use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyEventKind,
-};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
+use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::prelude::*;
 
 #[derive(Parser)]
@@ -73,29 +68,13 @@ fn main() -> io::Result<()> {
 
     // Load config before entering raw mode so errors are visible
     let connections = config::load_config(args.config);
-    let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, connections, cli_connection);
-    restore_terminal()?;
+
+    terminal::install_panic_hook();
+    terminal::enter()?;
+    let result = Terminal::new(CrosstermBackend::new(io::stdout()))
+        .and_then(|mut terminal| run(&mut terminal, connections, cli_connection));
+    terminal::leave();
     result
-}
-
-fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
-    enable_raw_mode()?;
-    io::stdout()
-        .execute(EnterAlternateScreen)?
-        .execute(EnableMouseCapture)?;
-    // Bracketed paste may not be supported in all environments (e.g. some tmux configs)
-    let _ = io::stdout().execute(EnableBracketedPaste);
-    Terminal::new(CrosstermBackend::new(io::stdout()))
-}
-
-fn restore_terminal() -> io::Result<()> {
-    disable_raw_mode()?;
-    let _ = io::stdout().execute(DisableBracketedPaste);
-    io::stdout()
-        .execute(DisableMouseCapture)?
-        .execute(LeaveAlternateScreen)?;
-    Ok(())
 }
 
 fn run(
@@ -131,6 +110,9 @@ fn run(
                     Event::Resize(_, _) => {
                         app.handle_resize();
                     }
+                    // Coming back to this terminal (e.g. another tmux window
+                    // was in front): make sure mouse reporting is still on.
+                    Event::FocusGained => terminal::enable_input_modes(),
                     _ => {}
                 }
                 // Process remaining queued events without blocking

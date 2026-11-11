@@ -59,6 +59,8 @@ src/
 │   ├── completion.rs # SQL autocompletion logic
 │   └── templates.rs  # Template popup handling
 ├── db.rs             # DatabaseClient enum (dispatch layer)
+├── session.rs        # Session: keepalive, reconnect with backoff, ConnStatus
+├── terminal.rs       # Terminal mode setup/restore (raw mode, mouse, paste, focus)
 ├── error.rs          # Error types (SqliError, Result alias)
 ├── editor.rs         # External editor integration
 ├── templates.rs      # Template storage and parsing
@@ -128,3 +130,11 @@ match key_code {
 1. **Controller pattern** - `Controller` owns all state; `App` handles rendering only
 2. **Module-per-backend** - Each database has its own module with consistent interface
 3. **TOML config** - Connections defined in `~/.config/sqli/config.toml`
+4. **Sessions own connections** - A connected tab holds an `Arc<Session>`, not a client.
+   Anything that talks to the server goes through `session.run(|client| ...)`, which
+   checks the connection first and reports failures back; do not cache the client.
+5. **Terminal modes in one place** - Entering/leaving the TUI (including around the
+   external editor) goes through `terminal::enter()` / `terminal::leave()`.
+6. **Hit-testing from rendered geometry** - The renderer stores the rects it drew
+   (`view_layout`, `tab_rects`, `result_columns`); mouse handlers read those and never
+   recompute layout from the terminal size.

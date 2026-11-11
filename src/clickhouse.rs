@@ -64,6 +64,16 @@ impl ClickHouseClient {
         }
     }
 
+    pub async fn ping(&self) -> Result<()> {
+        match self {
+            ClickHouseClient::Http(c) => c.execute_raw("SELECT 1").await.map(|_| ()),
+            ClickHouseClient::Native(c) => {
+                c.get_client().await?.ping().await?;
+                Ok(())
+            }
+        }
+    }
+
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         match self {
             ClickHouseClient::Http(c) => c.list_databases(include_system).await,
@@ -433,7 +443,7 @@ impl NativeClient {
         column: &str,
         sql_type: clickhouse_rs::types::SqlType,
     ) -> String {
-        use clickhouse_rs::types::{Enum16, Enum8, SqlType};
+        use clickhouse_rs::types::{Enum8, Enum16, SqlType};
 
         // Try getting Option<T> — works for both nullable and non-nullable columns
         macro_rules! try_value {

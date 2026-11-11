@@ -623,13 +623,12 @@ pub fn draw_completion(
     // Calculate popup position based on cursor
     let (cursor_row, cursor_col) = controller.current_tab().query_textarea.cursor();
 
-    // Query panel starts after sidebar + tab bar (1 row)
-    // Layout: sidebar is 40 cols (Constraint::Length(40) in draw_database_view)
-    // Textarea has line numbers (~4 chars including padding)
-    const SIDEBAR_WIDTH: u16 = 40;
+    // Anchor to the query pane as it was drawn this frame (it moves when the
+    // sidebar is hidden). Textarea has line numbers (~4 chars including padding)
     const LINE_NUMBER_WIDTH: u16 = 4;
-    let base_x = SIDEBAR_WIDTH + LINE_NUMBER_WIDTH;
-    let base_y = 2u16; // tab bar (1) + query block title (1)
+    let query_area = controller.view_layout.query.unwrap_or_default();
+    let base_x = query_area.x + LINE_NUMBER_WIDTH;
+    let base_y = query_area.y + 1; // below the query block title
 
     // Position popup below cursor line
     let popup_x = (base_x + cursor_col as u16).min(area.width.saturating_sub(32));

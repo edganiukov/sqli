@@ -26,28 +26,29 @@ impl Controller {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
         self.tabs.push(super::Tab::new(id, connections));
-        self.current_tab = self.tabs.len() - 1;
+        self.set_current_tab(self.tabs.len() - 1);
     }
 
     pub fn next_tab(&mut self) {
         if !self.tabs.is_empty() {
-            self.current_tab = (self.current_tab + 1) % self.tabs.len();
+            self.set_current_tab((self.current_tab + 1) % self.tabs.len());
         }
     }
 
     pub fn previous_tab(&mut self) {
         if !self.tabs.is_empty() {
-            if self.current_tab == 0 {
-                self.current_tab = self.tabs.len() - 1;
+            let previous = if self.current_tab == 0 {
+                self.tabs.len() - 1
             } else {
-                self.current_tab -= 1;
-            }
+                self.current_tab - 1
+            };
+            self.set_current_tab(previous);
         }
     }
 
     pub fn switch_to_tab_by_id(&mut self, target_id: usize) {
         if let Some(idx) = self.tabs.iter().position(|t| t.id == target_id) {
-            self.current_tab = idx;
+            self.set_current_tab(idx);
         }
     }
 
@@ -56,10 +57,12 @@ impl Controller {
             // Last tab, quit the app.
             self.quit = true;
         } else {
-            self.tabs.remove(self.current_tab);
-            if self.current_tab >= self.tabs.len() {
-                self.current_tab = self.tabs.len() - 1;
+            let closed = self.tabs.remove(self.current_tab);
+            // Dropping the handle alone would leave its query running.
+            if let Some(super::PendingOperation::Query { handle, .. }) = closed.pending_operation {
+                handle.abort();
             }
+            self.set_current_tab(self.current_tab.min(self.tabs.len() - 1));
             // Renumber tabs to be sequential (1, 2, 3, ...)
             for (idx, tab) in self.tabs.iter_mut().enumerate() {
                 tab.id = idx + 1;

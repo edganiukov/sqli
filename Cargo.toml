@@ -28,3 +28,6 @@ thiserror = "1"
 hex = "0.4"
 arboard = "3.6.1"
 rusqlite = { version = "0.38.0", features = ["bundled"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

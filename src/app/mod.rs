@@ -2,18 +2,22 @@ mod popups;
 pub mod theme;
 pub mod widgets;
 
-use crate::controller::{ColumnSegment, Controller, Focus, Mode, PopupState, ViewState};
-use crate::db::QueryResult;
-use crate::result_table::result_table_widths_with_overrides;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+    Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, Wrap,
 };
 use tui_textarea::CursorMove;
+
+use crate::controller::{
+    ColumnSegment, Controller, Focus, Mode, PendingOperation, PopupState, ViewLayout, ViewState,
+};
+use crate::db::QueryResult;
+use crate::result_table::result_table_widths_with_overrides;
+use crate::session::ConnStatus;
 
 use theme::*;
 use widgets::*;
@@ -77,6 +81,9 @@ impl App {
     pub fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
 
+        // Geometry is captured again below by whatever is drawn this frame.
+        self.controller.view_layout = ViewLayout::default();
+
         // Fill background
         frame.render_widget(Block::default().style(Style::default().bg(SURFACE)), area);
 
@@ -106,22 +113,51 @@ impl App {
         self.draw_popup(frame);
     }
 
-    fn draw_tabs(&self, frame: &mut Frame, area: Rect) {
+    fn draw_tabs(&mut self, frame: &mut Frame, area: Rect) {
         let mut spans = vec![];
+        let mut rects = Vec::with_capacity(self.controller.tabs.len());
+        let mut x = area.x;
+
         for (i, tab) in self.controller.tabs.iter().enumerate() {
-            let tab_name = format!(" [{}:{}] ", tab.id, tab.name);
-            let style = if i == self.controller.current_tab {
+            let is_current = i == self.controller.current_tab;
+            let base = if is_current {
                 Style::default()
                     .fg(SURFACE)
                     .bg(BLUE)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(TEXT_DIM).bg(SURFACE_DIM)
+                Style::default().fg(TEXT_MUTED).bg(SURFACE_DIM)
             };
 
-            spans.push(Span::styled(tab_name, style));
+            // Connection health marker. The status colors are unreadable on the
+            // current tab's bright background, where the glyph alone tells.
+            let marker = match tab.conn_status() {
+                Some(ConnStatus::Connected) => Some(("●", SUCCESS)),
+                Some(ConnStatus::Reconnecting { .. }) => Some(("◌", WARNING)),
+                None => None,
+            };
+
+            let mut label = vec![Span::styled(" ", base)];
+            if let Some((glyph, color)) = marker {
+                let style = if is_current { base } else { base.fg(color) };
+                label.push(Span::styled(format!("{} ", glyph), style));
+            }
+            label.push(Span::styled(format!("{}:{} ", tab.id, tab.name), base));
+
+            // Remember where the label landed so clicks hit exactly what is drawn.
+            let width: u16 = label.iter().map(|span| span.width() as u16).sum();
+            rects.push(Rect {
+                x,
+                y: area.y,
+                width: width.min(area.right().saturating_sub(x)),
+                height: area.height.min(1),
+            });
+            x = x.saturating_add(width).saturating_add(1);
+
+            spans.extend(label);
             spans.push(Span::styled(" ", Style::default().bg(SURFACE)));
         }
+        self.controller.tab_rects = rects;
 
         let tabs = Paragraph::new(Line::from(spans)).style(Style::default().bg(SURFACE));
         frame.render_widget(tabs, area);
@@ -129,79 +165,134 @@ impl App {
 
     fn draw_status_line(&self, frame: &mut Frame, area: Rect, view_state: ViewState) {
         let tab = self.controller.current_tab();
+        let conn_status = tab.conn_status();
+        let mut left: Vec<Span> = Vec::new();
 
-        let status_msg = if tab.loading {
-            let spinner = self.controller.spinner_char();
-            format!(
+        // Connection health: always visible while the tab has a connection.
+        match &conn_status {
+            Some(ConnStatus::Connected) => {
+                left.push(Span::styled(" ● ", Style::default().fg(SUCCESS)));
+            }
+            Some(ConnStatus::Reconnecting { .. }) => {
+                let spinner = format!(" {} ", self.controller.spinner_char());
+                left.push(Span::styled(spinner, bold(WARNING)));
+            }
+            None => left.push(Span::raw(" ")),
+        }
+
+        if view_state == ViewState::DatabaseView {
+            let db_name = tab.current_database.as_deref().unwrap_or("(none)");
+            left.push(Span::styled(db_name.to_string(), bold(TEXT)));
+
+            let is_readonly = tab
+                .connections
+                .get(tab.connected_index)
+                .is_some_and(|c| c.readonly);
+            if is_readonly {
+                left.push(Span::raw(" "));
+                left.push(Span::styled(" RO ", bold(SURFACE).bg(WARNING)));
+            }
+            if let Some(table) = tab.sidebar.tables.get(tab.sidebar.selected) {
+                left.push(Span::styled(format!(" › {}", table), dim()));
+            }
+            left.push(Span::styled("  │  ", Style::default().fg(BORDER)));
+        }
+
+        // Message: progress while working, reconnect progress while the link
+        // is down, otherwise the last status message.
+        if tab.loading {
+            let mut message = format!(
                 "{} {}",
-                spinner,
+                self.controller.spinner_char(),
                 tab.status_message.as_deref().unwrap_or("")
-            )
+            );
+            if let Some(PendingOperation::Query { start, .. }) = &tab.pending_operation {
+                message.push_str(&format!("  {:.1}s", start.elapsed().as_secs_f32()));
+            }
+            left.push(Span::styled(message, text()));
+        } else if let Some(ConnStatus::Reconnecting {
+            attempt,
+            error,
+            retry_in,
+        }) = &conn_status
+        {
+            let mut progress = "Reconnecting".to_string();
+            if *attempt > 0 {
+                progress.push_str(&format!(" · attempt {}", attempt));
+            }
+            if let Some(wait) = retry_in {
+                progress.push_str(&format!(" · retry in {}s", wait.as_secs_f32().ceil()));
+            }
+            left.push(Span::styled(progress, bold(WARNING)));
+            left.push(Span::styled(
+                format!("  {}", error.replace('\n', " ")),
+                Style::default().fg(ERROR),
+            ));
         } else {
-            tab.status_message.as_deref().unwrap_or("").to_string()
-        };
+            let message = tab.status_message.as_deref().unwrap_or("");
+            left.push(Span::styled(
+                message.replace('\n', " "),
+                Style::default().fg(TEXT_MUTED),
+            ));
+        }
 
-        // Pending key indicator
+        // Right side: pending key chord, then the position in the result set.
+        let mut right: Vec<Span> = Vec::new();
         let pending_indicator = if self.controller.pending_ctrl_w {
             " ^W- "
         } else if self.controller.pending_escape {
             " Esc- "
-        } else if self.controller.current_tab().pending_g {
+        } else if tab.pending_g {
             " g- "
         } else {
             ""
         };
+        if !pending_indicator.is_empty() {
+            right.push(Span::styled(pending_indicator, bold(ACCENT)));
+        }
+        if view_state == ViewState::DatabaseView
+            && let Some(QueryResult::Select { columns, rows }) = &tab.query_result
+            && !rows.is_empty()
+        {
+            right.push(Span::styled(
+                format!(
+                    " row {}/{} · col {}/{} ",
+                    tab.result_cursor + 1,
+                    rows.len(),
+                    tab.result_selected_col + 1,
+                    columns.len()
+                ),
+                dim(),
+            ));
+        }
 
-        let status_line = if view_state == ViewState::DatabaseView {
-            let conn = tab.connections.get(tab.connected_index);
-            let db_name = tab.current_database.as_deref().unwrap_or("(none)");
-            let table_name = tab
-                .sidebar
-                .tables
-                .get(tab.sidebar.selected)
-                .map(|t| format!(" > {}", t))
-                .unwrap_or_default();
-            let is_readonly = conn.map(|c| c.readonly).unwrap_or(false);
-            let ro_suffix = if is_readonly { " [RO]" } else { "" };
-
-            let left = format!(" {}{}{} ", db_name, ro_suffix, table_name);
-            let left_len = left.len() + status_msg.len();
-            let fill = (area.width as usize).saturating_sub(left_len + pending_indicator.len());
-
-            Paragraph::new(Line::from(vec![
-                Span::styled(left, text()),
-                Span::styled(status_msg, dim()),
-                Span::styled(" ".repeat(fill), Style::default()),
-                Span::styled(pending_indicator, Style::default().fg(ACCENT)),
-            ]))
-            .style(Style::default().bg(SURFACE_DIM))
-        } else {
-            let fill =
-                (area.width as usize).saturating_sub(status_msg.len() + pending_indicator.len());
-
-            Paragraph::new(Line::from(vec![
-                Span::styled(&status_msg, text()),
-                Span::styled(" ".repeat(fill), Style::default()),
-                Span::styled(pending_indicator, Style::default().fg(ACCENT)),
-            ]))
-            .style(Style::default().bg(SURFACE_DIM))
-        };
-
-        frame.render_widget(status_line, area);
+        let right = Line::from(right);
+        let bar = Style::default().bg(SURFACE_DIM);
+        let [left_area, right_area] = Layout::horizontal([
+            Constraint::Min(0),
+            Constraint::Length((right.width() as u16).min(area.width)),
+        ])
+        .areas(area);
+        frame.render_widget(Paragraph::new(Line::from(left)).style(bar), left_area);
+        frame.render_widget(Paragraph::new(right).style(bar), right_area);
     }
 
+    /// The bottom row is the `:` command prompt and nothing else. Shortcuts
+    /// are documented in the help popup (`?`), not here.
     fn draw_command_line(&self, frame: &mut Frame, area: Rect) {
-        let command_line = if self.controller.mode == Mode::Command {
-            let command_text = format!(":{}", self.controller.command_buffer);
-            frame.set_cursor_position((command_text.len() as u16, area.y));
-            Paragraph::new(command_text).style(Style::default().fg(TEXT).bg(SURFACE))
-        } else {
-            Paragraph::new(":help for commands").style(dim().bg(SURFACE))
-        };
-        frame.render_widget(command_line, area);
+        if self.controller.mode != Mode::Command {
+            return;
+        }
+        let command_text = format!(":{}", self.controller.command_buffer);
+        let cursor_x = area.x + command_text.chars().count() as u16;
+        frame.set_cursor_position((cursor_x, area.y));
+        frame.render_widget(
+            Paragraph::new(command_text).style(Style::default().fg(TEXT).bg(SURFACE)),
+            area,
+        );
     }
 
-    fn draw_connection_list(&self, frame: &mut Frame, area: Rect) {
+    fn draw_connection_list(&mut self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let filtered = tab.filtered_connections();
 
@@ -254,7 +345,7 @@ impl App {
             .title_style(accent_bold())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(dim())
+            .border_style(Style::default().fg(BORDER))
             .style(Style::default().bg(SURFACE));
 
         let inner_area = block.inner(list_area);
@@ -267,12 +358,10 @@ impl App {
             height: inner_area.height,
         };
 
-        if has_groups {
+        let items_area = if has_groups {
             let tabs_area = Rect {
-                x: content_area.x,
-                y: content_area.y,
-                width: content_area.width,
-                height: 1,
+                height: content_area.height.min(1),
+                ..content_area
             };
 
             let mut spans = vec![];
@@ -292,36 +381,30 @@ impl App {
 
             frame.render_widget(Paragraph::new(Line::from(spans)), tabs_area);
 
-            let list_content_area = Rect {
-                x: content_area.x,
+            Rect {
                 y: content_area.y + 2,
-                width: content_area.width,
                 height: content_area.height.saturating_sub(2),
-            };
-
-            let list = List::new(items)
-                .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
-                .highlight_symbol("> ");
-
-            let mut list_state = ListState::default();
-            list_state.select(Some(
-                tab.selected_index.min(filtered.len().saturating_sub(1)),
-            ));
-
-            frame.render_stateful_widget(list, list_content_area, &mut list_state);
+                ..content_area
+            }
         } else {
-            let list = List::new(items)
-                .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
-                .highlight_symbol("> ");
+            content_area
+        };
 
-            let mut list_state = ListState::default();
-            list_state.select(Some(tab.selected_index));
+        let list = List::new(items)
+            .highlight_style(Style::default().bg(HIGHLIGHT).fg(TEXT))
+            .highlight_symbol("> ");
 
-            frame.render_stateful_widget(list, content_area, &mut list_state);
-        }
+        let mut list_state = ListState::default();
+        list_state.select(Some(tab.selected_index.min(conn_count.saturating_sub(1))));
+
+        frame.render_stateful_widget(list, items_area, &mut list_state);
+
+        // Clicks map to items through the drawn rows and the list's scroll offset.
+        self.controller.view_layout.picker = Some(items_area);
+        self.controller.view_layout.picker_offset = list_state.offset();
     }
 
-    fn draw_database_list(&self, frame: &mut Frame, area: Rect) {
+    fn draw_database_list(&mut self, frame: &mut Frame, area: Rect) {
         let tab = self.controller.current_tab();
         let items: Vec<ListItem> = tab
             .databases
@@ -354,8 +437,9 @@ impl App {
             .title_style(accent_bold())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(dim())
+            .border_style(Style::default().fg(BORDER))
             .style(Style::default().bg(SURFACE));
+        let items_area = block.inner(list_area);
 
         let list = List::new(items)
             .block(block)
@@ -366,6 +450,10 @@ impl App {
         list_state.select(Some(tab.database_selected));
 
         frame.render_stateful_widget(list, list_area, &mut list_state);
+
+        // Clicks map to items through the drawn rows and the list's scroll offset.
+        self.controller.view_layout.picker = Some(items_area);
+        self.controller.view_layout.picker_offset = list_state.offset();
     }
 
     fn draw_database_view(&mut self, frame: &mut Frame, area: Rect) {
@@ -381,8 +469,8 @@ impl App {
             frame.render_widget(
                 Block::default()
                     .borders(Borders::RIGHT)
-                    .border_style(Style::default().fg(TEXT_DIM))
-                    .style(Style::default().bg(SURFACE_DIM)),
+                    .border_style(Style::default().fg(BORDER))
+                    .style(Style::default().bg(SURFACE_ALT)),
                 cols[0],
             );
             self.controller.view_layout.sidebar = None;
@@ -453,9 +541,10 @@ impl App {
 
         let list = List::new(items)
             .block(block)
+            // The selection stays visible, just quieter, when the pane is not focused.
             .highlight_style(
                 Style::default()
-                    .bg(if is_focused { HIGHLIGHT } else { SURFACE_DIM })
+                    .bg(if is_focused { HIGHLIGHT } else { HIGHLIGHT_DIM })
                     .fg(TEXT),
             )
             .highlight_symbol(if is_focused { "> " } else { "  " });
@@ -499,6 +588,7 @@ impl App {
             _ => None,
         };
         let title = match (tab.visual_select, row_count) {
+            _ if tab.query_error.is_some() => "Results ── error".to_string(),
             (Some(crate::controller::VisualSelect::Cell { .. }), _) => {
                 "Results ── VISUAL".to_string()
             }
@@ -523,7 +613,22 @@ impl App {
         self.controller.view_layout.output_table = Some(padded_area);
 
         let mut segments = Vec::new();
-        match &self.controller.current_tab().query_result {
+        let tab = self.controller.current_tab();
+        match &tab.query_result {
+            // A failed query shows its full message here, wrapped: the status
+            // bar only has room for the first line.
+            _ if tab.query_error.is_some() => {
+                let error = tab.query_error.as_deref().unwrap_or_default();
+                let mut lines = vec![
+                    Line::from(Span::styled("Query failed", bold(ERROR))),
+                    Line::from(""),
+                ];
+                lines.extend(error.lines().map(|line| Line::from(line.to_string())));
+                let msg = Paragraph::new(lines)
+                    .wrap(Wrap { trim: false })
+                    .style(Style::default().fg(TEXT).bg(bg_color));
+                frame.render_widget(msg, padded_area);
+            }
             Some(QueryResult::Select { columns, rows }) => {
                 segments =
                     self.draw_result_table(frame, padded_area, columns, rows, is_focused, bg_color);
@@ -671,7 +776,7 @@ impl App {
             .skip(scroll)
             .take(visible_height)
             .map(|(idx, row)| {
-                let is_cursor_row = idx == cursor && is_focused;
+                let is_cursor_row = idx == cursor;
                 let in_visual_range = visual_range.is_some_and(|(s, e)| idx >= s && idx <= e);
 
                 let cells = visible_col_indices
@@ -682,7 +787,7 @@ impl App {
                         let display_text = truncate_str(cell_text, w.saturating_sub(1));
                         let in_selection = (is_line_visual && in_visual_range)
                             || (is_cell_visual && in_visual_range && col_idx == selected_col)
-                            || (col_idx == selected_col && is_cursor_row);
+                            || (col_idx == selected_col && is_cursor_row && is_focused);
                         let style = if in_selection {
                             Style::default().fg(TEXT).bg(SELECTION)
                         } else if col_idx == selected_col && is_focused {
@@ -697,7 +802,12 @@ impl App {
                 if is_line_visual && in_visual_range {
                     row.style(Style::default().bg(SELECTION))
                 } else if is_cursor_row {
-                    row.style(Style::default().bg(HIGHLIGHT))
+                    // Quieter band when unfocused, so the position is not lost.
+                    row.style(Style::default().bg(if is_focused {
+                        HIGHLIGHT
+                    } else {
+                        HIGHLIGHT_DIM
+                    }))
                 } else {
                     row.style(Style::default().bg(bg_color))
                 }

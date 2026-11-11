@@ -20,6 +20,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - SQL autocompletion (keywords, tables, columns).
 - Record detail popup for viewing full row data.
 - Mouse support for navigation.
+- Connections are kept alive and re-established automatically, with the state shown in the status bar.
 - Quick connect via URL (`--connect pg://user@host/db`).
 - TOML configuration file with password command support.
 - Connection grouping for organizing databases.
@@ -75,9 +76,12 @@ A terminal-based SQL client. Supports multiple database backends.
 
 **Mouse**
 - Click on pane to focus.
-- Click on table in sidebar to select.
-- Click on row in output to open record detail.
-- Click on connection/database to connect.
+- Click on a tab to switch to it.
+- Click on table in sidebar to select, double-click to preview it.
+- Click on a cell in output to select it, double-click to open record detail.
+- Click on connection/database to select, double-click to connect.
+- Drag a column's header border to resize it.
+- Wheel scrolls the pane under the cursor.
 
 **Commands**
 - `:q` - quit a tab
@@ -86,6 +90,25 @@ A terminal-based SQL client. Supports multiple database backends.
 - `:next/:prev` - switch tabs
 - `:db` - switch database (within current connection)
 - `:system` - toggle system DBs
+
+## Connection handling
+
+Once a database is open, sqli keeps the connection alive and repairs it on its own:
+
+- An idle connection is pinged every 30 seconds, and a connection that has been
+  idle for a while is checked before a query is sent on it.
+- When the connection drops (server restart, network change, laptop sleep) it is
+  re-established in the background, retrying with a growing delay (1s up to 30s).
+- The status bar shows the state: a green `●` when connected, or
+  `Reconnecting · attempt N · retry in Ns` with the reason while it is down.
+  Tabs carry the same marker (`●` / `◌`).
+- Running a query while disconnected triggers an immediate reconnect attempt.
+
+A reconnect starts a new server session, so session state is gone: open
+transactions are rolled back, `SET` values and temporary tables are lost. If a
+transaction was open when the connection dropped, the next run is refused once
+with a message instead of executing outside the transaction. A statement that
+was interrupted mid-flight is never re-sent automatically.
 
 ## Quick Connect
 

@@ -43,6 +43,11 @@ impl SqliteClient {
         })
     }
 
+    /// A local file handle cannot drop, so there is nothing to probe.
+    pub async fn ping(&self) -> Result<()> {
+        Ok(())
+    }
+
     pub async fn list_databases(&self, _include_system: bool) -> Result<Vec<String>> {
         // SQLite is a single-database file — return the filename as the database name
         let name = self

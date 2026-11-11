@@ -42,6 +42,13 @@ impl CassandraClient {
         })
     }
 
+    pub async fn ping(&self) -> Result<()> {
+        self.session
+            .query_unpaged("SELECT now() FROM system.local", &[])
+            .await?;
+        Ok(())
+    }
+
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         let rows = self
             .session
@@ -220,7 +227,11 @@ impl CassandraClient {
                 let entries: Vec<String> = m
                     .iter()
                     .map(|(k, v)| {
-                        format!("{}:{}", Self::format_cql_value(k), Self::format_cql_value(v))
+                        format!(
+                            "{}:{}",
+                            Self::format_cql_value(k),
+                            Self::format_cql_value(v)
+                        )
                     })
                     .collect();
                 format!("{{{}}}", entries.join(","))

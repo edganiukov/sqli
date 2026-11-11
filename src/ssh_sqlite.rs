@@ -91,6 +91,9 @@ impl SshSqliteClient {
     async fn run_ssh_command(&self, remote_cmd: &str) -> Result<String> {
         let mut cmd = self.build_ssh_command();
         cmd.arg(remote_cmd);
+        // Without this ssh inherits the terminal as stdin and swallows key and
+        // mouse input meant for the UI while it runs.
+        cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
@@ -158,6 +161,12 @@ impl SshSqliteClient {
         }
 
         Ok(stdout)
+    }
+
+    /// Every query spawns its own `ssh`, so there is no connection to keep
+    /// alive (and probing would spawn a process on every keepalive tick).
+    pub async fn ping(&self) -> Result<()> {
+        Ok(())
     }
 
     pub async fn list_databases(&self, _include_system: bool) -> Result<Vec<String>> {

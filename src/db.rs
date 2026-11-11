@@ -41,6 +41,30 @@ macro_rules! dispatch {
 }
 
 impl DatabaseClient {
+    /// Cheap liveness probe used by the session keepalive.
+    pub async fn ping(&self) -> Result<()> {
+        dispatch!(self, ping().await)
+    }
+
+    /// Whether the connection is already known to be dead, without any I/O.
+    /// Only Postgres holds a single long-lived socket; the other backends pool
+    /// or reconnect internally and are probed with [`Self::ping`] instead.
+    pub fn is_closed(&self) -> bool {
+        match self {
+            DatabaseClient::Postgres(client) => client.is_closed(),
+            _ => false,
+        }
+    }
+
+    /// Ask the server to abort the statement currently running, where the
+    /// backend needs an explicit request for that.
+    pub async fn cancel_running(&self) -> Result<()> {
+        match self {
+            DatabaseClient::Postgres(client) => client.cancel_running().await,
+            _ => Ok(()),
+        }
+    }
+
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
         dispatch!(self, list_databases(include_system).await)
     }

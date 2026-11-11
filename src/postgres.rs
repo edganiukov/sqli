@@ -2,11 +2,15 @@ use crate::db::QueryResult;
 use crate::error::Result;
 use crate::format as fmt;
 
+use std::time::Duration;
+
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use serde_json::Value as JsonValue;
 use tokio_postgres::types::{FromSql, Kind, Type};
-use tokio_postgres::{Client, NoTls, Row};
+use tokio_postgres::{Client, Config, NoTls, Row};
 use uuid::Uuid;
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct PostgresClient {
     client: Client,
@@ -28,12 +32,28 @@ impl PostgresClient {
             database,
             user
         );
-        let conn_string = format!(
-            "host={} port={} user={} password={} dbname={}",
-            host, port, user, password, database
-        );
+        // Built field by field rather than as a `key=value` string: that format
+        // breaks on empty values and on spaces/quotes in passwords.
+        let mut config = Config::new();
+        config
+            .host(host)
+            .port(port)
+            .user(user)
+            .connect_timeout(CONNECT_TIMEOUT)
+            // TCP keepalive lets the OS notice a dead peer (sleep/wake, NAT
+            // expiry) so the connection closes instead of hanging silently.
+            .keepalives(true)
+            .keepalives_idle(Duration::from_secs(30))
+            .keepalives_interval(Duration::from_secs(10))
+            .keepalives_retries(3);
+        if !password.is_empty() {
+            config.password(password);
+        }
+        if !database.is_empty() {
+            config.dbname(database);
+        }
 
-        let (client, connection) = tokio_postgres::connect(&conn_string, NoTls).await?;
+        let (client, connection) = config.connect(NoTls).await?;
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
@@ -50,6 +70,24 @@ impl PostgresClient {
         }
 
         Ok(Self { client })
+    }
+
+    /// Round-trip a protocol-level `Sync`; fails if the connection is gone.
+    pub async fn ping(&self) -> Result<()> {
+        self.client.check_connection().await?;
+        Ok(())
+    }
+
+    /// True once the connection task has ended (server closed it, I/O error).
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
+
+    /// Ask the server to abort the statement currently running on this
+    /// connection. Dropping the client-side future alone leaves it running.
+    pub async fn cancel_running(&self) -> Result<()> {
+        self.client.cancel_token().cancel_query(NoTls).await?;
+        Ok(())
     }
 
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
@@ -211,10 +249,9 @@ impl PostgresClient {
             Type::TIMESTAMP_ARRAY => get_array!(NaiveDateTime),
             Type::TIMESTAMPTZ_ARRAY => get_array!(DateTime<Utc>),
             Type::DATE_ARRAY => get_array!(NaiveDate),
-            Type::BYTEA_ARRAY => {
-                row.try_get::<_, Option<Vec<Vec<u8>>>>(idx)
-                    .map(|v| fmt::null_or_else(v, |arr| fmt::collection("bytea[]", arr.len())))
-            }
+            Type::BYTEA_ARRAY => row
+                .try_get::<_, Option<Vec<Vec<u8>>>>(idx)
+                .map(|v| fmt::null_or_else(v, |arr| fmt::collection("bytea[]", arr.len()))),
 
             // Custom and unknown types — use Kind metadata + RawText fallback
             _ => Self::get_custom_value(row, idx, col_type),
@@ -238,14 +275,12 @@ impl PostgresClient {
 
             // Domain types wrap an underlying type — try RawText which reads
             // the binary representation (same encoding as the base type)
-            Kind::Domain(_) | Kind::Enum(_) | Kind::Composite(_) | Kind::Range(_) => row
-                .try_get::<_, Option<RawText>>(idx)
-                .map(fmt::null_or),
+            Kind::Domain(_) | Kind::Enum(_) | Kind::Composite(_) | Kind::Range(_) => {
+                row.try_get::<_, Option<RawText>>(idx).map(fmt::null_or)
+            }
 
             // Any other unknown type
-            _ => row
-                .try_get::<_, Option<RawText>>(idx)
-                .map(fmt::null_or),
+            _ => row.try_get::<_, Option<RawText>>(idx).map(fmt::null_or),
         }
     }
 }
@@ -265,7 +300,10 @@ impl std::fmt::Display for RawText {
 }
 
 impl<'a> FromSql<'a> for RawText {
-    fn from_sql(_ty: &Type, raw: &'a [u8]) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> std::result::Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         match std::str::from_utf8(raw) {
             Ok(s) => Ok(RawText(s.to_string())),
             Err(_) => Ok(RawText(fmt::bytes(raw, 32))),

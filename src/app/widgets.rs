@@ -3,14 +3,15 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders};
 
-use super::theme::{ACCENT, BLUE, SURFACE, SURFACE_DIM, TEXT_DIM};
+use super::theme::{ACCENT, BLUE, SURFACE, TEXT_MUTED, focus_colors};
 
 pub const PADDING: u16 = 1;
 
 /// Create a styled panel block with title (for main UI panels)
 pub fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_> {
-    let border_color = if is_focused { BLUE } else { TEXT_DIM };
-    let bg_color = if is_focused { SURFACE } else { SURFACE_DIM };
+    let (border_color, bg_color) = focus_colors(is_focused);
+    // An unfocused title stays readable; only the frame around it recedes.
+    let title_color = if is_focused { BLUE } else { TEXT_MUTED };
 
     Block::default()
         .title(Line::from(vec![
@@ -18,7 +19,7 @@ pub fn panel_block(title: &str, is_focused: bool, borders: Borders) -> Block<'_>
             Span::styled(
                 title,
                 Style::default()
-                    .fg(border_color)
+                    .fg(title_color)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" ──", Style::default().fg(border_color)),

@@ -1,11 +1,9 @@
-use crossterm::ExecutableCommand;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::process::Command;
+
+use crate::terminal;
 
 /// Open content in an external editor and return the edited content.
 /// Uses $EDITOR environment variable, falling back to vim.
@@ -22,19 +20,18 @@ pub fn edit_in_external_editor(content: &str, file_extension: &str) -> io::Resul
 
     fs::write(&temp_file, content)?;
 
-    // Leave TUI mode
-    disable_raw_mode()?;
-    io::stdout().execute(LeaveAlternateScreen)?;
+    // Hand the terminal to the editor in its normal state: with mouse
+    // reporting still on, an editor that does not use the mouse would receive
+    // every click as typed garbage.
+    terminal::leave();
 
     // Run the editor
     let status = Command::new(&editor).arg(&temp_file).status();
 
-    // Restore TUI mode
-    enable_raw_mode()?;
-    io::stdout().execute(EnterAlternateScreen)?;
-    // Force a redraw by clearing
-    print!("\x1B[2J\x1B[H");
-    io::stdout().flush()?;
+    // Take the terminal back. Editors switch mouse reporting and bracketed
+    // paste off when they exit, so these have to be requested again here; the
+    // caller forces a full redraw.
+    terminal::enter()?;
 
     // Check editor status and read result
     match status {

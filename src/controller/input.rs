@@ -4,10 +4,16 @@ use tui_textarea::CursorMove;
 
 impl Controller {
     pub fn handle_normal_mode(&mut self, key_event: KeyEvent) {
-        // Handle help popup from any state
-        if matches!(self.popup_state, PopupState::Help { .. }) {
-            self.handle_help_popup_keys(key_event.code);
-            return;
+        // Popups are modal: while one is open it gets every key, whichever
+        // pane has focus. Otherwise a popup could be left open behind a focus
+        // or tab change, where it swallows input without being visible.
+        match self.popup_state {
+            PopupState::None => {}
+            PopupState::Help { .. } => return self.handle_help_popup_keys(key_event.code),
+            PopupState::RecordDetail { .. } => {
+                return self.handle_record_detail_keys(key_event.code);
+            }
+            _ => return self.handle_popup_keys(key_event),
         }
 
         // Esc cancels pending operation (if any)
@@ -83,9 +89,11 @@ impl Controller {
 
         // Abort the spawned task so a long-running query stops instead of
         // running to completion in the background after the UI moves on.
+        let mut cancel_on_server = None;
         if let super::PendingOperation::Query { handle, .. } = &op {
             handle.abort();
             tab.status_message = Some("Query cancelled".to_string());
+            cancel_on_server = tab.session.clone();
         } else {
             tab.status_message = Some("Cancelled".to_string());
         }
@@ -95,7 +103,7 @@ impl Controller {
             op,
             super::PendingOperation::ListDatabases { .. } | super::PendingOperation::Connect { .. }
         ) {
-            if tab.db_client.is_some() {
+            if tab.session.is_some() {
                 // Already connected - return to database view
                 tab.view_state = ViewState::DatabaseView;
             } else {
@@ -103,6 +111,16 @@ impl Controller {
                 tab.name = "new".to_string();
             }
             tab.databases.clear();
+        }
+
+        // Aborting the task only stops waiting for the answer. The server
+        // keeps executing (and keeps the connection busy) until told to stop.
+        if let Some(session) = cancel_on_server {
+            self.runtime.spawn(async move {
+                if let Err(e) = session.client().cancel_running().await {
+                    crate::debug_log!("Failed to cancel query on the server: {}", e);
+                }
+            });
         }
 
         self.pending_escape = false;
@@ -163,7 +181,7 @@ impl Controller {
             }
             KeyCode::Esc => {
                 let tab = self.current_tab_mut();
-                if tab.db_client.is_some() {
+                if tab.session.is_some() {
                     // Already connected - go back to database view
                     tab.view_state = ViewState::DatabaseView;
                     tab.databases.clear();
@@ -294,12 +312,6 @@ impl Controller {
     }
 
     fn handle_query_keys(&mut self, key_event: KeyEvent) {
-        // Handle popup state first
-        if !matches!(self.popup_state, PopupState::None) {
-            self.handle_popup_keys(key_event);
-            return;
-        }
-
         // Handle Esc + : for command mode, Esc + ? for help
         if self.pending_escape {
             self.pending_escape = false;
@@ -407,87 +419,81 @@ impl Controller {
         self.current_tab_mut().query_textarea.input(key_event);
     }
 
-    fn handle_output_keys(&mut self, key_code: KeyCode) {
-        // Handle record detail popup first
-        if let PopupState::RecordDetail {
+    fn handle_record_detail_keys(&mut self, key_code: KeyCode) {
+        let PopupState::RecordDetail {
             row_index,
             selected_field,
             scroll,
-        } = &self.popup_state
-        {
-            // Get max field count from current query result
-            let max_field = self
-                .current_tab()
-                .query_result
-                .as_ref()
-                .map(|r| match r {
-                    crate::db::QueryResult::Select { columns, .. } => {
-                        columns.len().saturating_sub(1)
-                    }
-                    _ => 0,
-                })
-                .unwrap_or(0);
-
-            let row_index = *row_index;
-            let mut new_selected = *selected_field;
-            let mut new_scroll = *scroll;
-
-            match key_code {
-                KeyCode::Esc => {
-                    self.popup_state = PopupState::None;
-                    return;
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    new_selected = (new_selected + 1).min(max_field);
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    new_selected = new_selected.saturating_sub(1);
-                }
-                KeyCode::Char('g') => {
-                    new_selected = 0;
-                }
-                KeyCode::Char('G') => {
-                    new_selected = max_field;
-                }
-                KeyCode::PageDown => {
-                    new_selected = (new_selected + 10).min(max_field);
-                }
-                KeyCode::PageUp => {
-                    new_selected = new_selected.saturating_sub(10);
-                }
-                KeyCode::Char('y') => {
-                    // Copy the selected field value to clipboard
-                    if let Some(crate::db::QueryResult::Select { rows, .. }) =
-                        &self.current_tab().query_result
-                        && let Some(row) = rows.get(row_index)
-                    {
-                        let value = row.get(*selected_field).cloned().unwrap_or_default();
-                        self.copy_to_clipboard(&value, 1, "value");
-                    }
-                    return;
-                }
-                _ => {}
-            }
-
-            // Update scroll to keep selected field visible
-            // Estimate ~2 lines per field (name + value + spacing)
-            let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
-            let popup_height = (term_height as f32 * 0.8) as usize;
-            let visible_fields = popup_height.saturating_sub(4) / 2; // rough estimate
-            if new_selected < new_scroll {
-                new_scroll = new_selected;
-            } else if new_selected >= new_scroll + visible_fields {
-                new_scroll = new_selected.saturating_sub(visible_fields / 2);
-            }
-
-            self.popup_state = PopupState::RecordDetail {
-                row_index,
-                selected_field: new_selected,
-                scroll: new_scroll,
-            };
+        } = self.popup_state
+        else {
             return;
+        };
+
+        // Get max field count from current query result
+        let max_field = match &self.current_tab().query_result {
+            Some(crate::db::QueryResult::Select { columns, .. }) => columns.len().saturating_sub(1),
+            _ => 0,
+        };
+
+        let mut new_selected = selected_field;
+        let mut new_scroll = scroll;
+
+        match key_code {
+            KeyCode::Esc => {
+                self.popup_state = PopupState::None;
+                return;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                new_selected = (new_selected + 1).min(max_field);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                new_selected = new_selected.saturating_sub(1);
+            }
+            KeyCode::Char('g') => {
+                new_selected = 0;
+            }
+            KeyCode::Char('G') => {
+                new_selected = max_field;
+            }
+            KeyCode::PageDown => {
+                new_selected = (new_selected + 10).min(max_field);
+            }
+            KeyCode::PageUp => {
+                new_selected = new_selected.saturating_sub(10);
+            }
+            KeyCode::Char('y') => {
+                // Copy the selected field value to clipboard
+                if let Some(crate::db::QueryResult::Select { rows, .. }) =
+                    &self.current_tab().query_result
+                    && let Some(row) = rows.get(row_index)
+                {
+                    let value = row.get(selected_field).cloned().unwrap_or_default();
+                    self.copy_to_clipboard(&value, 1, "value");
+                }
+                return;
+            }
+            _ => {}
         }
 
+        // Update scroll to keep selected field visible
+        // Estimate ~2 lines per field (name + value + spacing)
+        let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
+        let popup_height = (term_height as f32 * 0.8) as usize;
+        let visible_fields = popup_height.saturating_sub(4) / 2; // rough estimate
+        if new_selected < new_scroll {
+            new_scroll = new_selected;
+        } else if new_selected >= new_scroll + visible_fields {
+            new_scroll = new_selected.saturating_sub(visible_fields / 2);
+        }
+
+        self.popup_state = PopupState::RecordDetail {
+            row_index,
+            selected_field: new_selected,
+            scroll: new_scroll,
+        };
+    }
+
+    fn handle_output_keys(&mut self, key_code: KeyCode) {
         // Visible data rows from the last rendered output geometry.
         let visible_height = self.output_visible_rows();
 
@@ -609,16 +615,11 @@ impl Controller {
             "new" => self.new_tab(),
             "db" => self.open_database_select(),
             "system" => self.toggle_system_databases(),
-            "help" | "h" => self.show_help(),
+            "help" | "h" => self.open_help_popup(),
             cmd => {
                 self.current_tab_mut().status_message = Some(format!("Unknown command: {}", cmd));
             }
         }
-    }
-
-    fn show_help(&mut self) {
-        let help = ":q quit | :db switch database | F5/Ctrl+E exec | Ctrl+Z undo | Ctrl+R redo | Ctrl+O templates";
-        self.current_tab_mut().status_message = Some(help.to_string());
     }
 
     fn toggle_system_databases(&mut self) {
@@ -654,21 +655,13 @@ impl Controller {
         let x = event.column;
         let y = event.row;
 
-        // Get terminal size (approximate, since we don't have frame here)
-        let term_size = crossterm::terminal::size().unwrap_or((80, 24));
-        let term_height = term_size.1;
-
-        // Layout constants
-        const STATUS_LINE_HEIGHT: u16 = 1;
-        const COMMAND_LINE_HEIGHT: u16 = 1;
-
         // Handle scroll events
         if matches!(
             event.kind,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
         ) {
             let scroll_up = matches!(event.kind, MouseEventKind::ScrollUp);
-            self.handle_mouse_scroll(x, y, scroll_up, term_size);
+            self.handle_mouse_scroll(x, y, scroll_up);
             return;
         }
 
@@ -693,6 +686,9 @@ impl Controller {
                     self.active_resize = None;
                     return;
                 }
+                // A press or a plain move while "dragging" means the release
+                // happened outside the window and was never delivered.
+                MouseEventKind::Down(_) | MouseEventKind::Moved => self.active_resize = None,
                 _ => {}
             }
         }
@@ -715,28 +711,22 @@ impl Controller {
             .unwrap_or(false);
         self.last_click = Some((std::time::Instant::now(), x, y));
 
-        // Handle tab bar clicks (row 0)
-        if y == 0 {
-            self.handle_mouse_tab_bar(x);
+        // Tab bar
+        if let Some(index) = self
+            .tab_rects
+            .iter()
+            .position(|rect| rect_contains(*rect, x, y))
+        {
+            self.set_current_tab(index);
             return;
         }
 
-        // Skip if clicking on status or command line
-        if y >= term_height - STATUS_LINE_HEIGHT - COMMAND_LINE_HEIGHT {
-            return;
-        }
-
-        let view_state = self.current_tab().view_state;
-
-        match view_state {
-            ViewState::ConnectionList => {
-                self.handle_mouse_connection_list(x, y, term_size, is_double_click);
-            }
-            ViewState::DatabaseList => {
-                self.handle_mouse_database_list(x, y, term_size, is_double_click);
+        match self.current_tab().view_state {
+            ViewState::ConnectionList | ViewState::DatabaseList => {
+                self.handle_mouse_picker(x, y, is_double_click);
             }
             ViewState::DatabaseView => {
-                self.handle_mouse_database_view(x, y, term_size, is_double_click);
+                self.handle_mouse_database_view(x, y, is_double_click);
             }
         }
     }
@@ -800,7 +790,7 @@ impl Controller {
         if matches!(self.popup_state, PopupState::Help { .. }) {
             self.handle_help_popup_keys(code);
         } else if matches!(self.popup_state, PopupState::RecordDetail { .. }) {
-            self.handle_output_keys(code);
+            self.handle_record_detail_keys(code);
         } else if matches!(
             self.popup_state,
             PopupState::TemplateList { .. } | PopupState::Completion { .. }
@@ -829,7 +819,7 @@ impl Controller {
         }
     }
 
-    fn handle_mouse_scroll(&mut self, x: u16, y: u16, scroll_up: bool, _term_size: (u16, u16)) {
+    fn handle_mouse_scroll(&mut self, x: u16, y: u16, scroll_up: bool) {
         let view_state = self.current_tab().view_state;
         const SCROLL_AMOUNT: usize = 3;
 
@@ -900,97 +890,40 @@ impl Controller {
         }
     }
 
-    fn handle_mouse_tab_bar(&mut self, x: u16) {
-        // Tabs are rendered as " [id:name] " with a space separator
-        // Calculate which tab was clicked
-        let mut current_x = 0u16;
-
-        for (i, tab) in self.tabs.iter().enumerate() {
-            // Format: " [id:name] " = name.len() + id_digits + 5
-            let id_width = if tab.id >= 10 { 2 } else { 1 };
-            let tab_width = (tab.name.len() + id_width + 5) as u16;
-
-            if x >= current_x && x < current_x + tab_width {
-                self.current_tab = i;
-                return;
-            }
-
-            current_x += tab_width + 1; // +1 for separator space
-        }
-    }
-
-    fn handle_mouse_connection_list(
-        &mut self,
-        _x: u16,
-        y: u16,
-        term_size: (u16, u16),
-        is_double_click: bool,
-    ) {
-        let tab = self.current_tab();
-        let filtered = tab.filtered_connections();
-        let filtered_count = filtered.len();
-        if filtered_count == 0 {
+    /// Click in the connection or database picker: select the row under the
+    /// cursor, and open it on a double-click.
+    fn handle_mouse_picker(&mut self, x: u16, y: u16, is_double_click: bool) {
+        let layout = self.view_layout;
+        let Some(list) = layout.picker else {
+            return;
+        };
+        if !rect_contains(list, x, y) {
             return;
         }
+        let index = (y - list.y) as usize + layout.picker_offset;
 
-        // Account for group tabs if present
-        let has_groups = tab.connection_groups.len() > 1;
-        let extra_offset = if has_groups { 2 } else { 0 }; // tabs + spacing
-
-        // Connection list is centered - sized to total connections for consistency
-        let total_count = tab.connections.len();
-        let list_height = (total_count as u16 + 4 + extra_offset as u16).min(term_size.1 - 4);
-        let list_y = 1 + (term_size.1 - 4 - list_height) / 2;
-
-        // Check if click is within the list area (after tabs/hint if present)
-        let list_content_y = list_y + 2 + extra_offset as u16;
-        if y >= list_content_y && y < list_content_y + filtered_count as u16 {
-            let clicked_index = (y - list_content_y) as usize;
-            if clicked_index < filtered_count {
-                self.current_tab_mut().selected_index = clicked_index;
-                if is_double_click {
-                    self.initiate_connection();
+        match self.current_tab().view_state {
+            ViewState::ConnectionList => {
+                if index < self.current_tab().filtered_connections().len() {
+                    self.current_tab_mut().selected_index = index;
+                    if is_double_click {
+                        self.initiate_connection();
+                    }
                 }
             }
+            ViewState::DatabaseList => {
+                if index < self.current_tab().databases.len() {
+                    self.current_tab_mut().database_selected = index;
+                    if is_double_click {
+                        self.connect_to_selected_database_from_list();
+                    }
+                }
+            }
+            ViewState::DatabaseView => {}
         }
     }
 
-    fn handle_mouse_database_list(
-        &mut self,
-        _x: u16,
-        y: u16,
-        term_size: (u16, u16),
-        is_double_click: bool,
-    ) {
-        let tab = self.current_tab();
-        let db_count = tab.databases.len();
-        if db_count == 0 {
-            return;
-        }
-
-        // Database list is centered
-        let list_height = (db_count as u16 + 4).min(term_size.1 - 4);
-        let list_y = 1 + (term_size.1 - 4 - list_height) / 2;
-
-        // Check if click is within the list area
-        if y >= list_y + 2 && y < list_y + 2 + db_count as u16 {
-            let clicked_index = (y - list_y - 2) as usize;
-            if clicked_index < db_count {
-                self.current_tab_mut().database_selected = clicked_index;
-                if is_double_click {
-                    self.connect_to_selected_database_from_list();
-                }
-            }
-        }
-    }
-
-    fn handle_mouse_database_view(
-        &mut self,
-        x: u16,
-        y: u16,
-        _term_size: (u16, u16),
-        is_double_click: bool,
-    ) {
+    fn handle_mouse_database_view(&mut self, x: u16, y: u16, is_double_click: bool) {
         let layout = self.view_layout;
 
         // Sidebar: map the click to a table via the rendered list rect + scroll offset.
@@ -1036,16 +969,27 @@ impl Controller {
             let mut clicked_valid_row = false;
             if let Some(table) = layout.output_table
                 && rect_contains(table, x, y)
-                && y > table.y
             {
-                // Header occupies table.y; data rows start at table.y + 1.
-                let clicked_row = (y - table.y - 1) as usize;
+                // The column under the cursor, from the rendered placements.
+                let clicked_col = self
+                    .result_columns
+                    .iter()
+                    .find(|seg| x >= seg.x && x < seg.right_edge())
+                    .map(|seg| seg.index);
+
                 let tab = self.current_tab_mut();
                 if let Some(crate::db::QueryResult::Select { rows, .. }) = &tab.query_result {
-                    let actual_row = tab.result_scroll + clicked_row;
-                    if actual_row < rows.len() {
-                        tab.result_cursor = actual_row;
-                        clicked_valid_row = true;
+                    // Header occupies table.y; data rows start at table.y + 1.
+                    let on_header = y == table.y;
+                    let actual_row = tab.result_scroll + (y - table.y).saturating_sub(1) as usize;
+                    if on_header || actual_row < rows.len() {
+                        if let Some(col) = clicked_col {
+                            tab.result_selected_col = col;
+                        }
+                        if !on_header {
+                            tab.result_cursor = actual_row;
+                            clicked_valid_row = true;
+                        }
                     }
                 }
             }
@@ -1060,4 +1004,251 @@ impl Controller {
 /// Whether the point `(x, y)` falls inside `rect`.
 fn rect_contains(rect: ratatui::layout::Rect, x: u16, y: u16) -> bool {
     x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    use super::*;
+    use crate::controller::{ColumnDrag, ColumnSegment, DatabaseConn, DatabaseType};
+    use crate::db::QueryResult;
+
+    fn connection(name: &str) -> DatabaseConn {
+        DatabaseConn {
+            name: name.to_string(),
+            db_type: DatabaseType::Sqlite,
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            password: None,
+            password_cmd: None,
+            database: None,
+            path: Some(format!("{name}.db")),
+            tls: false,
+            readonly: false,
+            group: None,
+            protocol: None,
+        }
+    }
+
+    /// A controller whose tab shows a two-row result, with the geometry the
+    /// renderer would have captured for a 100x24 terminal.
+    fn database_view() -> Controller {
+        let connections = vec![connection("a"), connection("b"), connection("c")];
+        let mut controller = Controller::with_connections(connections, None);
+
+        let tab = controller.current_tab_mut();
+        tab.view_state = ViewState::DatabaseView;
+        tab.focus = Focus::Query;
+        tab.query_result = Some(QueryResult::Select {
+            columns: vec!["id".to_string(), "name".to_string()],
+            rows: vec![
+                vec!["1".to_string(), "ann".to_string()],
+                vec!["2".to_string(), "bob".to_string()],
+            ],
+        });
+
+        controller.tab_rects = vec![Rect::new(0, 0, 8, 1)];
+        controller.view_layout.sidebar = Some(Rect::new(0, 1, 40, 20));
+        controller.view_layout.query = Some(Rect::new(40, 1, 60, 7));
+        controller.view_layout.output = Some(Rect::new(40, 8, 60, 13));
+        // Header on row 9, data rows from row 10.
+        controller.view_layout.output_table = Some(Rect::new(41, 9, 58, 12));
+        controller.result_columns = vec![
+            ColumnSegment {
+                index: 0,
+                x: 41,
+                width: 6,
+                full_width: 6,
+            },
+            ColumnSegment {
+                index: 1,
+                x: 47,
+                width: 10,
+                full_width: 10,
+            },
+        ];
+        controller
+    }
+
+    fn mouse(controller: &mut Controller, kind: MouseEventKind, x: u16, y: u16) {
+        controller.handle_mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    fn click(controller: &mut Controller, x: u16, y: u16) {
+        mouse(controller, MouseEventKind::Down(MouseButton::Left), x, y);
+    }
+
+    fn key(controller: &mut Controller, code: KeyCode, modifiers: KeyModifiers) {
+        controller.handle_normal_mode(KeyEvent::new(code, modifiers));
+    }
+
+    fn record_popup() -> PopupState {
+        PopupState::RecordDetail {
+            row_index: 0,
+            selected_field: 0,
+            scroll: 0,
+        }
+    }
+
+    #[test]
+    fn click_focuses_the_pane_under_the_cursor() {
+        let mut controller = database_view();
+
+        click(&mut controller, 10, 15);
+        assert_eq!(controller.current_tab().focus, Focus::Sidebar);
+        click(&mut controller, 60, 3);
+        assert_eq!(controller.current_tab().focus, Focus::Query);
+        click(&mut controller, 90, 19);
+        assert_eq!(controller.current_tab().focus, Focus::Output);
+    }
+
+    #[test]
+    fn click_on_a_result_cell_selects_its_row_and_column() {
+        let mut controller = database_view();
+
+        click(&mut controller, 50, 11);
+
+        let tab = controller.current_tab();
+        assert_eq!(tab.focus, Focus::Output);
+        assert_eq!(tab.result_cursor, 1);
+        assert_eq!(tab.result_selected_col, 1);
+    }
+
+    #[test]
+    fn click_below_the_last_row_keeps_the_selection() {
+        let mut controller = database_view();
+
+        click(&mut controller, 50, 14);
+
+        let tab = controller.current_tab();
+        assert_eq!(tab.focus, Focus::Output);
+        assert_eq!((tab.result_cursor, tab.result_selected_col), (0, 0));
+    }
+
+    /// Regression: Ctrl-w used to be handled before the popup, so a popup
+    /// could be left open behind a tab switch. In a tab where it had nothing
+    /// to draw it was invisible, yet it kept swallowing every mouse click.
+    #[test]
+    fn popup_is_modal_until_closed() {
+        let mut controller = database_view();
+        controller.new_tab();
+        controller.set_current_tab(0);
+        controller.popup_state = record_popup();
+
+        key(&mut controller, KeyCode::Char('w'), KeyModifiers::CONTROL);
+        key(&mut controller, KeyCode::Char('n'), KeyModifiers::NONE);
+        assert_eq!(controller.current_tab, 0);
+        assert!(matches!(
+            controller.popup_state,
+            PopupState::RecordDetail { .. }
+        ));
+
+        // Clicks do not reach the panes while it is open...
+        click(&mut controller, 10, 15);
+        assert_eq!(controller.current_tab().focus, Focus::Query);
+
+        // ...and do again once it is closed.
+        key(&mut controller, KeyCode::Esc, KeyModifiers::NONE);
+        assert!(matches!(controller.popup_state, PopupState::None));
+        click(&mut controller, 10, 15);
+        assert_eq!(controller.current_tab().focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn switching_tabs_drops_popups_and_drags() {
+        let mut controller = database_view();
+        controller.new_tab();
+        controller.popup_state = record_popup();
+        controller.pending_ctrl_w = true;
+        controller.active_resize = Some(ColumnDrag {
+            col_index: 0,
+            start_x: 46,
+            start_width: 6,
+        });
+
+        controller.next_tab();
+
+        assert!(matches!(controller.popup_state, PopupState::None));
+        assert!(!controller.pending_ctrl_w);
+        assert!(controller.active_resize.is_none());
+    }
+
+    #[test]
+    fn tab_bar_click_uses_the_rendered_labels() {
+        let mut controller = database_view();
+        controller.new_tab();
+        controller.set_current_tab(0);
+        controller.tab_rects = vec![Rect::new(0, 0, 8, 1), Rect::new(9, 0, 7, 1)];
+
+        // The one-cell gap between labels belongs to neither tab.
+        click(&mut controller, 8, 0);
+        assert_eq!(controller.current_tab, 0);
+
+        click(&mut controller, 9, 0);
+        assert_eq!(controller.current_tab, 1);
+    }
+
+    #[test]
+    fn picker_click_accounts_for_the_scroll_offset() {
+        let mut controller = database_view();
+        controller.current_tab_mut().view_state = ViewState::ConnectionList;
+        // Two visible rows, scrolled so that the second connection is on top.
+        controller.view_layout.picker = Some(Rect::new(20, 5, 40, 2));
+        controller.view_layout.picker_offset = 1;
+
+        click(&mut controller, 25, 6);
+        assert_eq!(controller.current_tab().selected_index, 2);
+        click(&mut controller, 25, 5);
+        assert_eq!(controller.current_tab().selected_index, 1);
+
+        // Outside the list rows nothing is selected.
+        click(&mut controller, 25, 7);
+        assert_eq!(controller.current_tab().selected_index, 1);
+    }
+
+    #[test]
+    fn column_drag_resizes_and_ends_on_release() {
+        let mut controller = database_view();
+
+        // Grab the right edge of the first column in the header row.
+        click(&mut controller, 46, 9);
+        assert!(controller.active_resize.is_some());
+        mouse(
+            &mut controller,
+            MouseEventKind::Drag(MouseButton::Left),
+            50,
+            9,
+        );
+        assert_eq!(
+            controller.current_tab().result_col_overrides.get(&0),
+            Some(&10)
+        );
+
+        mouse(
+            &mut controller,
+            MouseEventKind::Up(MouseButton::Left),
+            50,
+            9,
+        );
+        assert!(controller.active_resize.is_none());
+    }
+
+    /// The release can happen outside the terminal and never be delivered.
+    #[test]
+    fn drag_without_a_release_ends_on_the_next_plain_move() {
+        let mut controller = database_view();
+        click(&mut controller, 46, 9);
+        assert!(controller.active_resize.is_some());
+
+        mouse(&mut controller, MouseEventKind::Moved, 60, 12);
+
+        assert!(controller.active_resize.is_none());
+    }
 }

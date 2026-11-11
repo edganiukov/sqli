@@ -1,17 +1,47 @@
-use super::{Controller, DatabaseType, Focus, PendingOperation};
-use crate::db::{DatabaseClient, QueryResult};
-use crate::debug_log;
-use crate::error::SqliError;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+
 use tokio::sync::oneshot;
+
+use super::{Controller, DatabaseConn, DatabaseType, Focus, PendingOperation};
+use crate::db::{DatabaseClient, QueryResult};
+use crate::debug_log;
+use crate::error::{Result, SqliError};
+use crate::session::{DbSession, Session};
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Bound a background operation so a dead peer cannot leave the tab loading
+/// forever. `what` names the operation in the error ("Connection timed out").
+async fn with_timeout<T>(what: &str, operation: impl Future<Output = Result<T>>) -> Result<T> {
+    match tokio::time::timeout(CONNECTION_TIMEOUT, operation).await {
+        Ok(result) => result,
+        Err(_) => Err(SqliError::Connection(format!("{} timed out", what))),
+    }
+}
+
 impl Controller {
+    /// Refuse to start an operation while another is still pending on this
+    /// tab. Replacing it would leave the old task running (and, on a
+    /// single-connection backend, blocking the new one) with nobody listening
+    /// for its result.
+    fn reject_if_busy(&mut self) -> bool {
+        let tab = self.current_tab_mut();
+        if tab.pending_operation.is_none() {
+            return false;
+        }
+        tab.status_message = Some("Still working — press Esc to cancel it first".to_string());
+        true
+    }
+
     /// Step 1: User selects a connection - either connect directly (if database configured)
     /// or fetch list of databases for selection
     pub fn initiate_connection(&mut self) {
+        if self.reject_if_busy() {
+            return;
+        }
+
         let (conn, actual_index) = {
             let tab = self.current_tab();
             let filtered = tab.filtered_connections();
@@ -30,8 +60,7 @@ impl Controller {
         };
 
         // Store the actual index for database operations after connection
-        let tab = self.current_tab_mut();
-        tab.connected_index = actual_index;
+        self.current_tab_mut().connected_index = actual_index;
 
         debug_log!(
             "Initiating connection to {} ({}://{}:{})",
@@ -58,31 +87,7 @@ impl Controller {
         }
 
         // Otherwise, fetch database list for selection
-        tab.status_message = Some("Connecting...".to_string());
-        tab.loading = true;
-
-        let include_system = tab.show_system_databases;
-        let conn_name = conn.name.clone();
-
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let db_name = conn.db_type.default_database().to_string();
-            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let (client, pwd_warning) = conn.create_client(&db_name).await?;
-                if let Some(warn) = pwd_warning {
-                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
-                }
-                client.list_databases(include_system).await
-            })
-            .await
-            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
-            let _ = tx.send(result);
-        });
-
-        self.current_tab_mut().pending_operation = Some(PendingOperation::ListDatabases {
-            receiver: rx,
-            conn_name,
-        });
+        self.list_databases(conn, None, "Connecting...");
     }
 
     /// Open database selection popup from DatabaseView (switch databases)
@@ -104,42 +109,39 @@ impl Controller {
             return;
         }
 
-        let tab = self.current_tab_mut();
-        tab.loading = true;
-        tab.status_message = Some("Fetching databases...".to_string());
-
-        let include_system = tab.show_system_databases;
-        let conn_name = conn.name.clone();
-
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let db_name = conn.db_type.default_database().to_string();
-            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let (client, pwd_warning) = conn.create_client(&db_name).await?;
-                if let Some(warn) = pwd_warning {
-                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
-                }
-                client.list_databases(include_system).await
-            })
-            .await
-            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
-            let _ = tx.send(result);
-        });
-        self.current_tab_mut().pending_operation = Some(PendingOperation::ListDatabases {
-            receiver: rx,
-            conn_name,
-        });
+        if self.reject_if_busy() {
+            return;
+        }
+        let session = self.current_tab().session.clone();
+        self.list_databases(conn, session, "Fetching databases...");
     }
 
     /// Refresh the database list (used when toggling system databases)
     pub(super) fn refresh_database_list(&mut self) {
-        let tab = self.current_tab_mut();
+        let tab = self.current_tab();
         let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
             None => return,
         };
 
-        tab.status_message = Some("Refreshing...".to_string());
+        if self.reject_if_busy() {
+            return;
+        }
+        let session = self.current_tab().session.clone();
+        self.list_databases(conn, session, "Refreshing...");
+    }
+
+    /// Fetch the database list of `conn` in the background. An already open
+    /// `session` to that server is reused; otherwise a connection is opened
+    /// just for the listing.
+    fn list_databases(
+        &mut self,
+        conn: DatabaseConn,
+        session: Option<Arc<DbSession>>,
+        status: &str,
+    ) {
+        let tab = self.current_tab_mut();
+        tab.status_message = Some(status.to_string());
         tab.loading = true;
 
         let include_system = tab.show_system_databases;
@@ -147,16 +149,22 @@ impl Controller {
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let db_name = conn.db_type.default_database().to_string();
-            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let (client, pwd_warning) = conn.create_client(&db_name).await?;
-                if let Some(warn) = pwd_warning {
-                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
+            let result = with_timeout("Connection", async {
+                match session {
+                    Some(session) => {
+                        session
+                            .run(
+                                |client| async move { client.list_databases(include_system).await },
+                            )
+                            .await
+                    }
+                    None => {
+                        let client = conn.create_client(conn.db_type.default_database()).await?;
+                        client.list_databases(include_system).await
+                    }
                 }
-                client.list_databases(include_system).await
             })
-            .await
-            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
+            .await;
             let _ = tx.send(result);
         });
 
@@ -178,6 +186,10 @@ impl Controller {
 
     /// Connect to a specific database and load tables
     pub(super) fn connect_to_database(&mut self, db_name: String) {
+        if self.reject_if_busy() {
+            return;
+        }
+
         let tab = self.current_tab_mut();
         let conn = match tab.connections.get(tab.connected_index) {
             Some(c) => c.clone(),
@@ -197,10 +209,9 @@ impl Controller {
         tab.loading = true;
 
         let conn_name = conn.name.clone();
-        let db_name_clone = db_name.clone();
+        let database = db_name.clone();
 
-        // Determine connection database and schema for listing tables
-        let connect_db = db_name.clone();
+        // Schema to list tables from
         let schema = match conn.db_type {
             DatabaseType::Postgres => "public".to_string(),
             _ => db_name.clone(),
@@ -208,23 +219,21 @@ impl Controller {
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let result = tokio::time::timeout(CONNECTION_TIMEOUT, async {
-                let (client, pwd_warning) = conn.create_client(&connect_db).await?;
-                if let Some(warn) = pwd_warning {
-                    crate::debug_log!("Password warning for {}: {}", conn.name, warn);
-                }
-                let tables = client.list_tables(&schema).await?;
-                Ok((client, tables))
+            let result = with_timeout("Connection", async {
+                let session = Session::open(conn, database).await?;
+                let tables = session
+                    .run(|client| async move { client.list_tables(&schema).await })
+                    .await?;
+                Ok((session, tables))
             })
-            .await
-            .unwrap_or_else(|_| Err(SqliError::Connection("Connection timed out".to_string())));
+            .await;
             let _ = tx.send(result);
         });
 
         self.current_tab_mut().pending_operation = Some(PendingOperation::Connect {
             receiver: rx,
             conn_name,
-            db_name: db_name_clone,
+            db_name,
         });
     }
 
@@ -314,25 +323,24 @@ impl Controller {
 
     pub(super) fn refresh_tables(&mut self) {
         let tab = self.current_tab();
-        let client = match &tab.db_client {
-            Some(c) => Arc::clone(c),
-            None => return,
+        let Some(session) = tab.session.clone() else {
+            return;
         };
-
-        let conn = match tab.connections.get(tab.connected_index) {
-            Some(c) => c.clone(),
-            None => return,
+        let Some(conn) = tab.connections.get(tab.connected_index) else {
+            return;
         };
-
-        let db_name = match &tab.current_database {
-            Some(db) => db.clone(),
-            None => return,
+        let Some(db_name) = tab.current_database.clone() else {
+            return;
         };
 
         let schema = match conn.db_type {
             DatabaseType::Postgres => "public".to_string(),
-            _ => db_name.clone(),
+            _ => db_name,
         };
+
+        if self.reject_if_busy() {
+            return;
+        }
 
         let tab = self.current_tab_mut();
         tab.loading = true;
@@ -340,9 +348,11 @@ impl Controller {
 
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
-            let result = tokio::time::timeout(CONNECTION_TIMEOUT, client.list_tables(&schema))
-                .await
-                .unwrap_or_else(|_| Err(SqliError::Query("Refresh timed out".to_string())));
+            let result = with_timeout(
+                "Refresh",
+                session.run(|client| async move { client.list_tables(&schema).await }),
+            )
+            .await;
             let _ = tx.send(result);
         });
 
@@ -372,8 +382,8 @@ impl Controller {
         let tab = self.current_tab();
         let table = tab.sidebar.tables.get(tab.sidebar.selected)?;
         let db_name = tab.current_database.as_ref()?;
-        let client = tab.db_client.as_ref()?;
-        Some(f(client, table, db_name))
+        let client = tab.session.as_ref()?.client();
+        Some(f(&client, table, db_name))
     }
 
     /// Split query text into individual statements by semicolon.
@@ -453,13 +463,14 @@ impl Controller {
             }
         }
 
-        let client = match &tab.db_client {
-            Some(c) => Arc::clone(c),
-            None => {
-                self.current_tab_mut().status_message = Some("Not connected".to_string());
-                return;
-            }
+        let Some(session) = tab.session.clone() else {
+            self.current_tab_mut().status_message = Some("Not connected".to_string());
+            return;
         };
+
+        if self.reject_if_busy() {
+            return;
+        }
 
         debug_log!(
             "Executing {} statement(s): {}",
@@ -477,7 +488,9 @@ impl Controller {
 
         let (tx, rx) = oneshot::channel();
         let handle = self.runtime.spawn(async move {
-            let result = Self::execute_statements(&client, statements).await;
+            let result = session
+                .run(|client| Self::execute_statements(client, &session, statements))
+                .await;
             let _ = tx.send(result);
         });
 
@@ -490,14 +503,27 @@ impl Controller {
 
     /// Execute multiple statements sequentially, combining results
     async fn execute_statements(
-        client: &DatabaseClient,
+        client: Arc<DatabaseClient>,
+        session: &DbSession,
         statements: Vec<String>,
-    ) -> crate::error::Result<QueryResult> {
+    ) -> Result<QueryResult> {
+        // After a reconnect the server has rolled back whatever transaction
+        // was open. Running the next statements anyway would silently commit
+        // them one by one, so stop and say so instead.
+        if session.take_transaction_lost() {
+            return Err(SqliError::Other(
+                "The connection was lost and re-established, which rolled back the open \
+                 transaction. Nothing was executed - start the transaction again."
+                    .to_string(),
+            ));
+        }
+
         let mut last_select: Option<QueryResult> = None;
         let mut total_rows_affected: u64 = 0;
 
         for stmt in statements {
             let result = client.execute_query(&stmt).await?;
+            session.track_statement(&stmt);
             match result {
                 QueryResult::Select { .. } => {
                     last_select = Some(result);

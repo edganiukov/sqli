@@ -1,7 +1,13 @@
-use super::{Controller, PopupState};
-use crate::completion::{self, CompletionContext, Suggestion};
+use std::time::Duration;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use tui_textarea::CursorMove;
+
+use super::{Controller, PopupState};
+use crate::completion::{self, CompletionContext, Suggestion};
+
+/// Upper bound on the synchronous column fetch behind Ctrl+Space.
+const COLUMN_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl Controller {
     pub(super) fn open_completion(&mut self) {
@@ -63,27 +69,34 @@ impl Controller {
 
         // Try to fetch columns from database
         let tab = self.current_tab();
-        let db_client = match &tab.db_client {
-            Some(client) => client.clone(),
-            None => return Vec::new(),
+        let Some(session) = tab.session.clone() else {
+            return Vec::new();
         };
         let current_db = tab.current_database.clone();
 
-        let result = self.runtime.block_on(async {
-            db_client
-                .list_columns(&table_name, current_db.as_deref())
-                .await
+        // This blocks the UI thread, so it must stay short: a busy or dead
+        // connection just means no column suggestions this time.
+        let lookup = session.run(|client| {
+            let table_name = table_name.clone();
+            async move {
+                client
+                    .list_columns(&table_name, current_db.as_deref())
+                    .await
+            }
         });
+        let result = self
+            .runtime
+            .block_on(async { tokio::time::timeout(COLUMN_LOOKUP_TIMEOUT, lookup).await });
 
         match result {
-            Ok(columns) => {
+            Ok(Ok(columns)) => {
                 // Cache the columns
                 self.current_tab_mut()
                     .column_cache
                     .insert(table_name, columns.clone());
                 columns
             }
-            Err(_) => Vec::new(),
+            _ => Vec::new(),
         }
     }
 

@@ -18,6 +18,30 @@ pub enum SqliError {
     Other(String),
 }
 
+impl SqliError {
+    /// Whether this error means the connection itself is unusable (as opposed
+    /// to the server rejecting a statement over a working connection).
+    pub fn is_connection(&self) -> bool {
+        matches!(self, SqliError::Connection(_) | SqliError::Io(_))
+    }
+
+    /// The error text without the category prefix that `Display` adds.
+    pub fn message(&self) -> String {
+        match self {
+            SqliError::Connection(msg) | SqliError::Query(msg) | SqliError::Other(msg) => {
+                msg.clone()
+            }
+            SqliError::Io(e) => e.to_string(),
+        }
+    }
+}
+
+/// SQLSTATE codes the server sends while tearing a session down: class 08
+/// (connection exception) and the 57P0x shutdown family.
+fn is_pg_connection_state(code: &str) -> bool {
+    code.starts_with("08") || matches!(code, "57P01" | "57P02" | "57P03")
+}
+
 impl From<tokio_postgres::Error> for SqliError {
     fn from(e: tokio_postgres::Error) -> Self {
         // Log full error for debugging
@@ -43,7 +67,11 @@ impl From<tokio_postgres::Error> for SqliError {
                 msg.push_str(hint);
                 msg.push(')');
             }
-            SqliError::Query(msg)
+            if is_pg_connection_state(db_err.code().code()) {
+                SqliError::Connection(msg)
+            } else {
+                SqliError::Query(msg)
+            }
         } else if let Some(source) = e.source() {
             // IO or other connection errors
             SqliError::Connection(source.to_string())
@@ -55,7 +83,11 @@ impl From<tokio_postgres::Error> for SqliError {
 
 impl From<mysql_async::Error> for SqliError {
     fn from(e: mysql_async::Error) -> Self {
-        SqliError::Connection(e.to_string())
+        match e {
+            // The server answered, so the link works: this is a statement error.
+            mysql_async::Error::Server(err) => SqliError::Query(err.to_string()),
+            other => SqliError::Connection(other.to_string()),
+        }
     }
 }
 

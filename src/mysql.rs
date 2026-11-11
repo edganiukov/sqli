@@ -1,5 +1,5 @@
 use crate::db::QueryResult;
-use crate::error::{Result, SqliError};
+use crate::error::Result;
 use crate::format as fmt;
 use mysql_async::prelude::*;
 use mysql_async::{Opts, OptsBuilder, Pool, Value};
@@ -41,6 +41,12 @@ impl MySqlClient {
         conn.query_drop("SELECT 1").await?;
 
         Ok(Self { pool })
+    }
+
+    pub async fn ping(&self) -> Result<()> {
+        let mut conn = self.pool.get_conn().await?;
+        conn.ping().await?;
+        Ok(())
     }
 
     pub async fn list_databases(&self, include_system: bool) -> Result<Vec<String>> {
@@ -102,13 +108,12 @@ impl MySqlClient {
                 rows: data_rows,
             })
         } else {
-            let result = conn.exec_drop(query, ()).await;
-            match result {
-                Ok(_) => Ok(QueryResult::Execute {
-                    rows_affected: conn.affected_rows(),
-                }),
-                Err(e) => Err(SqliError::Query(e.to_string())),
-            }
+            // Text protocol: the prepared-statement protocol rejects statements
+            // such as USE or LOCK TABLES.
+            conn.query_drop(query).await?;
+            Ok(QueryResult::Execute {
+                rows_affected: conn.affected_rows(),
+            })
         }
     }
 

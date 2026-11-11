@@ -5,7 +5,8 @@ mod navigation;
 mod templates;
 
 use crate::db::{DatabaseClient, QueryResult};
-use crate::error::Result;
+use crate::error::{Result, SqliError};
+use crate::session::{ConnStatus, DbSession};
 use crate::templates::{Template, TemplateStore};
 use ratatui::layout::Rect;
 use std::sync::Arc;
@@ -26,7 +27,7 @@ pub enum PendingOperation {
         conn_name: String,
     },
     Connect {
-        receiver: oneshot::Receiver<Result<(DatabaseClient, Vec<String>)>>,
+        receiver: oneshot::Receiver<Result<(Arc<DbSession>, Vec<String>)>>,
         conn_name: String,
         db_name: String,
     },
@@ -40,6 +41,9 @@ pub enum PendingOperation {
         receiver: oneshot::Receiver<Result<Vec<String>>>,
     },
 }
+
+/// Shown wherever a reconnect is reported: the server-side session is new.
+const SESSION_RESET_NOTE: &str = "(session state was reset)";
 
 fn run_password_command(cmd: &str) -> std::io::Result<String> {
     let output = if cfg!(target_os = "windows") {
@@ -173,35 +177,48 @@ pub struct DatabaseConn {
 }
 
 impl DatabaseConn {
-    /// Resolve the password, either from password_cmd or password field.
-    /// Returns (password, Option<warning_message>) where warning is set if password_cmd failed.
-    pub fn resolve_password(&self) -> (String, Option<String>) {
+    /// Resolve the password: the output of `password_cmd` when configured,
+    /// otherwise the `password` field. A failing command falls back to
+    /// `password` if one is set, and is an error otherwise.
+    fn resolve_password_blocking(&self) -> Result<String> {
         if let Some(ref cmd) = self.password_cmd {
             match run_password_command(cmd) {
-                Ok(pwd) => return (pwd, None),
+                Ok(pwd) => return Ok(pwd),
                 Err(e) => {
                     crate::debug_log!("Failed to run password_cmd '{}': {}", cmd, e);
-                    let warning = format!("password_cmd failed: {}", e);
-                    // Fall back to password field if available
-                    if let Some(ref pwd) = self.password {
-                        return (pwd.clone(), Some(warning));
+                    if self.password.is_none() {
+                        return Err(SqliError::Connection(format!("password_cmd failed: {}", e)));
                     }
-                    return (String::new(), Some(warning));
                 }
             }
         }
-        (self.password.clone().unwrap_or_default(), None)
+        Ok(self.password.clone().unwrap_or_default())
     }
 
-    pub async fn create_client(&self, database: &str) -> Result<(DatabaseClient, Option<String>)> {
-        let (password, pwd_warning) = self.resolve_password();
+    /// [`Self::resolve_password_blocking`] off the async worker threads, since
+    /// `password_cmd` can take a while (or wait on a prompt).
+    pub async fn resolve_password(&self) -> Result<String> {
+        let conn = self.clone();
+        tokio::task::spawn_blocking(move || conn.resolve_password_blocking())
+            .await
+            .map_err(|e| SqliError::Other(format!("password_cmd task failed: {}", e)))?
+    }
+
+    /// Resolve credentials and open a client for `database`.
+    pub async fn create_client(&self, database: &str) -> Result<DatabaseClient> {
+        let password = self.resolve_password().await?;
+        self.connect(database, &password).await
+    }
+
+    /// Open a client for `database` with an already resolved password.
+    pub async fn connect(&self, database: &str, password: &str) -> Result<DatabaseClient> {
         let client = match self.db_type {
             DatabaseType::Postgres => {
                 let client = PostgresClient::connect(
                     &self.host,
                     self.port,
                     &self.user,
-                    &password,
+                    password,
                     database,
                     self.readonly,
                 )
@@ -213,7 +230,7 @@ impl DatabaseConn {
                     &self.host,
                     self.port,
                     &self.user,
-                    &password,
+                    password,
                     database,
                     self.readonly,
                 )
@@ -223,10 +240,9 @@ impl DatabaseConn {
             DatabaseType::Cassandra => {
                 // Cassandra/CQL has no read-only session mode; read-only access
                 // must be enforced via a read-only DB role/permissions.
-                let client = CassandraClient::connect(
-                    &self.host, self.port, &self.user, &password, database,
-                )
-                .await?;
+                let client =
+                    CassandraClient::connect(&self.host, self.port, &self.user, password, database)
+                        .await?;
                 DatabaseClient::Cassandra(client)
             }
             DatabaseType::ClickHouse => {
@@ -238,7 +254,7 @@ impl DatabaseConn {
                     &self.host,
                     self.port,
                     &self.user,
-                    &password,
+                    password,
                     database,
                     self.tls,
                     use_http,
@@ -251,8 +267,7 @@ impl DatabaseConn {
                 let path = self.path.as_deref().unwrap_or_default();
                 if self.host.is_empty() {
                     // Local SQLite
-                    let client =
-                        crate::sqlite::SqliteClient::connect(path, self.readonly).await?;
+                    let client = crate::sqlite::SqliteClient::connect(path, self.readonly).await?;
                     DatabaseClient::Sqlite(client)
                 } else {
                     // Remote SQLite via SSH
@@ -266,7 +281,7 @@ impl DatabaseConn {
                 }
             }
         };
-        Ok((client, pwd_warning))
+        Ok(client)
     }
 }
 
@@ -307,11 +322,16 @@ pub struct ColumnDrag {
     pub start_width: usize,
 }
 
-/// Rectangles captured during the last DatabaseView render, so mouse hit-testing
-/// and page-size math read the exact same geometry the renderer used instead of
+/// Rectangles captured during the last render, so mouse hit-testing and
+/// page-size math read the exact same geometry the renderer used instead of
 /// re-deriving it from terminal size (which drifts and causes off-by-one bugs).
+/// Reset every frame: a region that was not drawn cannot be hit.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ViewLayout {
+    /// Item rows of the connection / database picker list.
+    pub picker: Option<Rect>,
+    /// Index of the first picker item on screen (the list's scroll offset).
+    pub picker_offset: usize,
     /// Sidebar pane outer area (None when the sidebar is hidden).
     pub sidebar: Option<Rect>,
     /// Sidebar list content area (inner of the panel block) for row hit-testing.
@@ -376,7 +396,13 @@ pub struct Tab {
     pub connected_index: usize, // index in full connections list (after connection)
     pub view_state: ViewState,
     pub focus: Focus,
-    pub db_client: Option<Arc<DatabaseClient>>,
+    /// Live connection to `current_database`; reconnects on its own.
+    pub session: Option<Arc<DbSession>>,
+    /// Whether `session` was up at the last poll, to announce changes once.
+    pub conn_up: bool,
+    /// `session.reconnects()` as of the last announcement. Catches a
+    /// reconnect that finished between two polls.
+    pub conn_reconnects: u64,
     pub current_database: Option<String>, // the selected database we're connected to
     pub databases: Vec<String>,           // list of databases for DatabaseList view
     pub database_selected: usize,         // selected index in database list
@@ -385,6 +411,8 @@ pub struct Tab {
     pub column_cache: std::collections::HashMap<String, Vec<String>>, // table -> columns
     pub query_textarea: TextArea<'static>,
     pub query_result: Option<QueryResult>,
+    /// Full text of the last query failure, shown in the results pane.
+    pub query_error: Option<String>,
     pub result_scroll: usize,
     pub result_cursor: usize,
     pub result_h_scroll: usize,
@@ -425,7 +453,9 @@ impl Tab {
             connected_index: 0,
             view_state: ViewState::ConnectionList,
             focus: Focus::Sidebar,
-            db_client: None,
+            session: None,
+            conn_up: false,
+            conn_reconnects: 0,
             current_database: None,
             databases: Vec::new(),
             database_selected: 0,
@@ -434,6 +464,7 @@ impl Tab {
             column_cache: std::collections::HashMap::new(),
             query_textarea: TextArea::default(),
             query_result: None,
+            query_error: None,
             result_scroll: 0,
             result_cursor: 0,
             result_h_scroll: 0,
@@ -448,6 +479,45 @@ impl Tab {
             selected_group: 0,
             pending_operation: None,
         }
+    }
+
+    /// Health of this tab's connection, if it has one.
+    pub fn conn_status(&self) -> Option<ConnStatus> {
+        self.session.as_ref().map(|session| session.status())
+    }
+
+    /// Announce a lost or restored connection in the status bar, once per
+    /// change. Held back while an operation is running so its progress
+    /// message stays visible; the indicator shows the live state meanwhile.
+    fn announce_connection_changes(&mut self) {
+        if self.loading {
+            return;
+        }
+        let Some(session) = &self.session else {
+            return;
+        };
+        let status = session.status();
+        let up = status == ConnStatus::Connected;
+        let reconnected = self.take_reconnected();
+        if up == self.conn_up && !reconnected {
+            return;
+        }
+        self.conn_up = up;
+        self.status_message = Some(match status {
+            ConnStatus::Connected => format!("Reconnected {}", SESSION_RESET_NOTE),
+            ConnStatus::Reconnecting { error, .. } => format!("Connection lost: {}", error),
+        });
+    }
+
+    /// Whether the connection was re-established since this was last asked.
+    fn take_reconnected(&mut self) -> bool {
+        let Some(session) = &self.session else {
+            return false;
+        };
+        let reconnects = session.reconnects();
+        let changed = reconnects != self.conn_reconnects;
+        self.conn_reconnects = reconnects;
+        changed
     }
 
     /// Get connections filtered by the current selected group
@@ -548,8 +618,10 @@ pub struct Controller {
     pub spinner_state: usize,
     pub clipboard: Option<arboard::Clipboard>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
-    /// Geometry captured during the last DatabaseView render.
+    /// Geometry captured during the last render.
     pub view_layout: ViewLayout,
+    /// Tab bar label areas from the last render, in tab order.
+    pub tab_rects: Vec<Rect>,
     /// Visible result-table column placements from the last render (for resize hit-testing).
     pub result_columns: Vec<ColumnSegment>,
     /// Active column resize drag, if the user is currently dragging a header border.
@@ -593,6 +665,7 @@ impl Controller {
             clipboard,
             last_click: None,
             view_layout: ViewLayout::default(),
+            tab_rects: Vec::new(),
             result_columns: Vec::new(),
             active_resize: None,
             next_tab_id: 2,
@@ -629,9 +702,13 @@ impl Controller {
 
         // Track if current tab connected (to reset textarea)
         let mut current_tab_connected = false;
+        // Track if the current tab's result set was replaced
+        let mut current_tab_result_changed = false;
         let current_tab_idx = self.current_tab;
 
         for (tab_idx, tab) in self.tabs.iter_mut().enumerate() {
+            tab.announce_connection_changes();
+
             let op = match tab.pending_operation.take() {
                 Some(op) => op,
                 None => continue,
@@ -661,7 +738,8 @@ impl Controller {
                             }
                             Err(e) => {
                                 crate::debug_log!("Failed to list databases: {}", e);
-                                tab.status_message = Some(format!("Connection failed: {}", e));
+                                tab.status_message =
+                                    Some(format!("Connection failed: {}", e.message()));
                             }
                         }
                     }
@@ -684,7 +762,7 @@ impl Controller {
                     Ok(result) => {
                         tab.loading = false;
                         match result {
-                            Ok((client, tables)) => {
+                            Ok((session, tables)) => {
                                 crate::debug_log!(
                                     "Connected to '{}', found {} table(s)",
                                     db_name,
@@ -692,7 +770,10 @@ impl Controller {
                                 );
                                 tab.name = conn_name;
                                 tab.current_database = Some(db_name);
-                                tab.db_client = Some(Arc::new(client));
+                                tab.conn_reconnects = session.reconnects();
+                                tab.session = Some(session);
+                                tab.conn_up = true;
+                                tab.column_cache.clear();
                                 tab.sidebar.tables = tables;
                                 tab.sidebar.selected = 0;
                                 tab.sidebar.offset = 0;
@@ -706,7 +787,8 @@ impl Controller {
                             }
                             Err(e) => {
                                 crate::debug_log!("Connection failed: {}", e);
-                                tab.status_message = Some(format!("Connection failed: {}", e));
+                                tab.status_message =
+                                    Some(format!("Connection failed: {}", e.message()));
                             }
                         }
                     }
@@ -736,10 +818,21 @@ impl Controller {
                         tab.result_selected_col = 0;
                         tab.result_col_overrides.clear();
                         tab.visual_select = None;
+                        if tab_idx == current_tab_idx {
+                            current_tab_result_changed = true;
+                        }
                         let timestamp = Local::now().format("%H:%M:%S");
+                        // The query may have had to reconnect before running.
+                        let reconnected = if tab.take_reconnected() {
+                            tab.conn_up = true;
+                            format!(" - reconnected {}", SESSION_RESET_NOTE)
+                        } else {
+                            String::new()
+                        };
 
                         match result {
                             Ok(query_result) => {
+                                tab.query_error = None;
                                 tab.query_result = Some(query_result.clone());
                                 match &query_result {
                                     QueryResult::Select { rows, .. } => {
@@ -749,10 +842,11 @@ impl Controller {
                                             elapsed
                                         );
                                         tab.status_message = Some(format!(
-                                            "[{}] {} row(s) returned in {:.2?}",
+                                            "[{}] {} row(s) returned in {:.2?}{}",
                                             timestamp,
                                             rows.len(),
-                                            elapsed
+                                            elapsed,
+                                            reconnected
                                         ));
                                     }
                                     QueryResult::Execute { rows_affected } => {
@@ -762,8 +856,8 @@ impl Controller {
                                             elapsed
                                         );
                                         tab.status_message = Some(format!(
-                                            "[{}] {} row(s) affected in {:.2?}",
-                                            timestamp, rows_affected, elapsed
+                                            "[{}] {} row(s) affected in {:.2?}{}",
+                                            timestamp, rows_affected, elapsed, reconnected
                                         ));
                                     }
                                 }
@@ -772,7 +866,12 @@ impl Controller {
                                 let db_name = tab.current_database.as_deref().unwrap_or("unknown");
                                 crate::debug_log!("Query error on database '{}': {}", db_name, e);
                                 tab.query_result = None;
-                                tab.status_message = Some(format!("Error: {}", e));
+                                // The results pane shows the full text; the
+                                // one-line status bar gets its first line.
+                                let text = e.to_string();
+                                let summary = text.lines().next().unwrap_or_default();
+                                tab.status_message = Some(format!("[{}] {}", timestamp, summary));
+                                tab.query_error = Some(e.message());
                             }
                         }
                     }
@@ -822,6 +921,26 @@ impl Controller {
         if current_tab_connected {
             self.current_tab_mut().query_textarea = TextArea::default();
         }
+
+        // The record popup points at a row of the result that was just replaced
+        if current_tab_result_changed && matches!(self.popup_state, PopupState::RecordDetail { .. })
+        {
+            self.popup_state = PopupState::None;
+        }
+    }
+
+    /// Make `index` the visible tab and drop UI state that belonged to the
+    /// previous one (popups, half-typed key chords, an in-progress drag), so
+    /// none of it leaks into a tab where it is not visible.
+    pub(super) fn set_current_tab(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
+        self.current_tab = index;
+        self.popup_state = PopupState::None;
+        self.pending_escape = false;
+        self.pending_ctrl_w = false;
+        self.active_resize = None;
     }
 }
 
