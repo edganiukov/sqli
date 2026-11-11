@@ -4,7 +4,7 @@ mod input;
 mod navigation;
 mod templates;
 
-use crate::db::{DatabaseClient, QueryResult};
+use crate::db::{DatabaseClient, QueryResult, Tls};
 use crate::error::{Result, SqliError};
 use crate::session::{ConnStatus, DbSession};
 use crate::templates::{Template, TemplateStore};
@@ -170,6 +170,8 @@ pub struct DatabaseConn {
     pub database: Option<String>,
     pub path: Option<String>,
     pub tls: bool,
+    /// With `tls`: whether the server certificate is verified (the default).
+    pub tls_verify: bool,
     pub readonly: bool,
     pub group: Option<String>,
     /// Protocol for ClickHouse: "native" (default) or "http"
@@ -204,6 +206,15 @@ impl DatabaseConn {
             .map_err(|e| SqliError::Other(format!("password_cmd task failed: {}", e)))?
     }
 
+    /// How this connection is encrypted, from `tls` and `tls_verify`.
+    pub fn tls_mode(&self) -> Tls {
+        match (self.tls, self.tls_verify) {
+            (false, _) => Tls::Off,
+            (true, true) => Tls::Verified,
+            (true, false) => Tls::Unverified,
+        }
+    }
+
     /// Resolve credentials and open a client for `database`.
     pub async fn create_client(&self, database: &str) -> Result<DatabaseClient> {
         let password = self.resolve_password().await?;
@@ -212,6 +223,27 @@ impl DatabaseConn {
 
     /// Open a client for `database` with an already resolved password.
     pub async fn connect(&self, database: &str, password: &str) -> Result<DatabaseClient> {
+        self.open_client(database, password)
+            .await
+            .map_err(|e| self.with_tls_hint(e))
+    }
+
+    /// A certificate that fails verification is most often a self-signed one;
+    /// say how to accept it instead of leaving the user with the bare error.
+    fn with_tls_hint(&self, error: SqliError) -> SqliError {
+        let message = error.message();
+        if self.tls_mode() == Tls::Verified && message.to_lowercase().contains("certificate") {
+            SqliError::Connection(format!(
+                "{} If the server uses a self-signed certificate, set tls_verify = false \
+                 (or add ?tls_verify=false to the URL) to connect without verifying it.",
+                message
+            ))
+        } else {
+            error
+        }
+    }
+
+    async fn open_client(&self, database: &str, password: &str) -> Result<DatabaseClient> {
         let client = match self.db_type {
             DatabaseType::Postgres => {
                 let client = PostgresClient::connect(
@@ -221,6 +253,7 @@ impl DatabaseConn {
                     password,
                     database,
                     self.readonly,
+                    self.tls_mode(),
                 )
                 .await?;
                 DatabaseClient::Postgres(client)
@@ -233,6 +266,7 @@ impl DatabaseConn {
                     password,
                     database,
                     self.readonly,
+                    self.tls_mode(),
                 )
                 .await?;
                 DatabaseClient::MySql(client)
@@ -240,9 +274,15 @@ impl DatabaseConn {
             DatabaseType::Cassandra => {
                 // Cassandra/CQL has no read-only session mode; read-only access
                 // must be enforced via a read-only DB role/permissions.
-                let client =
-                    CassandraClient::connect(&self.host, self.port, &self.user, password, database)
-                        .await?;
+                let client = CassandraClient::connect(
+                    &self.host,
+                    self.port,
+                    &self.user,
+                    password,
+                    database,
+                    self.tls_mode(),
+                )
+                .await?;
                 DatabaseClient::Cassandra(client)
             }
             DatabaseType::ClickHouse => {
@@ -256,7 +296,7 @@ impl DatabaseConn {
                     &self.user,
                     password,
                     database,
-                    self.tls,
+                    self.tls_mode(),
                     use_http,
                     self.readonly,
                 )
@@ -410,6 +450,8 @@ pub struct Tab {
     pub sidebar_hidden: bool, // whether the sidebar is hidden in DatabaseView
     pub column_cache: std::collections::HashMap<String, Vec<String>>, // table -> columns
     pub query_textarea: TextArea<'static>,
+    /// Size the query pane was last drawn at, to notice when it changes.
+    pub query_pane_size: Option<(u16, u16)>,
     pub query_result: Option<QueryResult>,
     /// Full text of the last query failure, shown in the results pane.
     pub query_error: Option<String>,
@@ -463,6 +505,7 @@ impl Tab {
             sidebar_hidden: false,
             column_cache: std::collections::HashMap::new(),
             query_textarea: TextArea::default(),
+            query_pane_size: None,
             query_result: None,
             query_error: None,
             result_scroll: 0,

@@ -84,6 +84,7 @@ A terminal-based SQL client. Supports multiple database backends.
 - Wheel scrolls the pane under the cursor.
 
 **Commands**
+- `:help` or `?` - show all keybindings
 - `:q` - quit a tab
 - `:qa` or `q!` - quit all tabs
 - `:new` - new tab
@@ -130,7 +131,8 @@ sqli --connect "pg://user:pass@localhost:5432/mydb"
 
 - If database is specified → connects directly
 - If database is omitted → shows database list for selection
-- Add `s` suffix to scheme for TLS (`pgs`, `mys`, `css`, `chs`, `chhs`)
+- Add `s` suffix to scheme for TLS (`pgs`, `mys`, `chs`, `chhs`); see [TLS](#tls)
+- Add `?tls_verify=false` to accept a self-signed server certificate
 - Default ports are used if not specified (5432, 3306, 9042, 9000, 8123)
 - Default users: `postgres` (pg), `root` (my), `default` (ch)
 
@@ -139,6 +141,7 @@ sqli --connect "pg://user:pass@localhost:5432/mydb"
 sqli --connect "pg://postgres@localhost/mydb"       # Direct connect to mydb
 sqli --connect "pg://postgres:secret@localhost"     # Shows database list
 sqli --connect "pgs://admin@db.example.com/prod"    # PostgreSQL with TLS
+sqli --connect "pgs://admin@10.0.0.5/prod?tls_verify=false"  # TLS, self-signed cert
 sqli --connect "ch://default@localhost:9000/mydb"   # ClickHouse native protocol
 sqli --connect "chs://default@ch.example.com:9440"  # ClickHouse native + TLS
 sqli --connect "chh://default@localhost:8123/mydb"  # ClickHouse HTTP API
@@ -153,6 +156,11 @@ Configuration is loaded from (in order of priority):
 1. `--config` flag (e.g., `sqli --config /path/to/config.toml`)
 2. `./sqli.toml` (current directory)
 3. `~/.config/sqli/config.toml`
+
+A config file that cannot be read or parsed, or that names an unknown database
+type, stops sqli at startup with the error. Without any config file a default
+`localhost` PostgreSQL connection is offered. With `--connect` the config file
+is not read.
 
 ### Example config.toml
 
@@ -229,12 +237,30 @@ group = "Local"
 | `password` | Password (plaintext) |
 | `password_cmd` | Command to retrieve password (e.g., `pass show db/prod`) |
 | `database` | Default database (skips database selection) |
-| `tls` | Enable TLS (default: false) |
+| `tls` | Enable TLS (default: false); see [TLS](#tls) |
+| `tls_verify` | With `tls`: verify the server certificate (default: true) |
 | `readonly` | Read-only mode, blocks non-SELECT queries (default: false) |
 | `group` | Group name for organizing connections (optional) |
 | `protocol` | ClickHouse only: `native` (default) or `http` |
 
 Groups are displayed as tabs in the connection list. Use `h/l` to switch between groups. Connections without a group only appear under "All".
+
+### TLS
+
+With `tls = true` (or an `s` scheme such as `pgs://`) the connection is encrypted
+and the server's certificate and host name are verified against the system trust
+store. sqli never falls back to plain text when TLS was requested.
+
+Servers with a self-signed certificate fail that verification. Set
+`tls_verify = false` (or `?tls_verify=false` in a URL) to keep the encryption but
+skip the verification; this protects against eavesdropping, not against someone
+impersonating the server.
+
+| Database | TLS |
+|----------|-----|
+| PostgreSQL, MySQL, ClickHouse (native and HTTP) | supported |
+| Cassandra/ScyllaDB | not supported: connecting with `tls = true` is refused |
+| SQLite | not applicable |
 
 ## Query Templates
 

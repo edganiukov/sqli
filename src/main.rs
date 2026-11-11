@@ -13,6 +13,7 @@ mod mysql;
 mod postgres;
 mod result_table;
 mod session;
+mod sql;
 mod sqlite;
 mod ssh_sqlite;
 mod templates;
@@ -66,8 +67,19 @@ fn main() -> io::Result<()> {
         None
     };
 
-    // Load config before entering raw mode so errors are visible
-    let connections = config::load_config(args.config);
+    // Load config before entering raw mode so errors are visible. With
+    // --connect the config is not used at all, so it is not read either.
+    let connections = if cli_connection.is_some() {
+        Vec::new()
+    } else {
+        match config::load_config(args.config) {
+            Ok(connections) => connections,
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    };
 
     terminal::install_panic_hook();
     terminal::enter()?;
@@ -106,9 +118,6 @@ fn run(
                     }
                     Event::Paste(text) => {
                         app.handle_paste(text);
-                    }
-                    Event::Resize(_, _) => {
-                        app.handle_resize();
                     }
                     // Coming back to this terminal (e.g. another tmux window
                     // was in front): make sure mouse reporting is still on.

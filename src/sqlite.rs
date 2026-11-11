@@ -1,5 +1,6 @@
 use crate::db::QueryResult;
 use crate::error::{Result, SqliError};
+use crate::sql;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -130,11 +131,11 @@ impl SqliteClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, _schema: Option<&str>) -> String {
-        format!("SELECT * FROM \"{}\" LIMIT {}", table, limit)
+        format!("SELECT * FROM {} LIMIT {}", sql::ident(table, '"'), limit)
     }
 
     pub fn describe_table_query(&self, table: &str, _schema: Option<&str>) -> String {
-        format!("PRAGMA table_info(\"{}\")", table)
+        format!("PRAGMA table_info({})", sql::ident(table, '"'))
     }
 
     pub async fn list_columns(&self, table: &str, _schema: Option<&str>) -> Result<Vec<String>> {
@@ -143,7 +144,7 @@ impl SqliteClient {
             .lock()
             .map_err(|e| SqliError::Other(e.to_string()))?;
         let mut stmt = conn
-            .prepare(&format!("PRAGMA table_info(\"{}\")", table))
+            .prepare(&format!("PRAGMA table_info({})", sql::ident(table, '"')))
             .map_err(|e| SqliError::Query(e.to_string()))?;
 
         let columns: Vec<String> = stmt

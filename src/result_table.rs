@@ -2,6 +2,8 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
 
+use unicode_width::UnicodeWidthStr;
+
 pub const CELL_PADDING: usize = 2;
 /// Absolute floor for any column, so even tiny columns stay readable.
 pub const MIN_COL_WIDTH: usize = 8;
@@ -23,12 +25,14 @@ fn column_floor(natural_width: usize, header_len: usize) -> usize {
 ///
 /// Widths include a small right-side padding so cells breathe.
 pub fn measure_column_widths(columns: &[String], rows: &[Vec<String>]) -> Vec<usize> {
-    let mut widths: Vec<usize> = columns.iter().map(|h| h.len() + CELL_PADDING).collect();
+    // Measured in terminal columns, so multi-byte and wide (CJK) text gets the
+    // space it actually occupies on screen.
+    let mut widths: Vec<usize> = columns.iter().map(|h| h.width() + CELL_PADDING).collect();
 
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
             if i < widths.len() {
-                widths[i] = widths[i].max(cell.len() + CELL_PADDING);
+                widths[i] = widths[i].max(cell.width() + CELL_PADDING);
             }
         }
     }
@@ -130,7 +134,7 @@ pub fn result_table_widths(
     let lower_bounds: Vec<usize> = columns
         .iter()
         .zip(measured.iter())
-        .map(|(col, &natural)| column_floor(natural, col.chars().count()))
+        .map(|(col, &natural)| column_floor(natural, col.width()))
         .collect();
     fit_column_widths(&measured, &lower_bounds, available_width)
 }
@@ -169,6 +173,17 @@ mod tests {
 
     fn cols(names: &[&str]) -> Vec<String> {
         names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn widths_are_display_columns() {
+        let columns = cols(&["名前", "café"]);
+        let rows = vec![vec!["東京都".to_string(), "é".to_string()]];
+        // "東京都" is 3 chars / 9 bytes but 6 columns; "café" is 5 bytes but 4 columns.
+        assert_eq!(
+            measure_column_widths(&columns, &rows),
+            [6 + CELL_PADDING, 4 + CELL_PADDING]
+        );
     }
 
     #[test]

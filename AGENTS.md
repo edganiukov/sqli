@@ -60,6 +60,7 @@ src/
 │   └── templates.rs  # Template popup handling
 ├── db.rs             # DatabaseClient enum (dispatch layer)
 ├── session.rs        # Session: keepalive, reconnect with backoff, ConnStatus
+├── sql.rs            # Identifier / literal quoting for generated SQL
 ├── terminal.rs       # Terminal mode setup/restore (raw mode, mouse, paste, focus)
 ├── error.rs          # Error types (SqliError, Result alias)
 ├── editor.rs         # External editor integration
@@ -138,3 +139,9 @@ match key_code {
 6. **Hit-testing from rendered geometry** - The renderer stores the rects it drew
    (`view_layout`, `tab_rects`, `result_columns`); mouse handlers read those and never
    recompute layout from the terminal size.
+7. **One connection per session** - Postgres and MySQL clients hold a single connection
+   so transactions and session state span statements; do not introduce a pool there.
+8. **Generated SQL quotes names** - Table/schema/database names go through `sql::ident`
+   and values through `sql::literal`; never interpolate them raw.
+9. **Text is measured in terminal columns** - Use `unicode-width` (`.width()`) for
+   layout, and byte offsets only for slicing; the editor cursor column counts chars.

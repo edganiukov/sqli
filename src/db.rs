@@ -12,6 +12,18 @@ pub enum QueryResult {
     },
 }
 
+/// How a connection is encrypted.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Tls {
+    /// Plain TCP.
+    Off,
+    /// TLS, verifying the server certificate and host name.
+    Verified,
+    /// TLS without verifying who the server is: encrypted, but open to an
+    /// active man-in-the-middle. For servers with self-signed certificates.
+    Unverified,
+}
+
 /// Database client abstraction using enum dispatch
 pub enum DatabaseClient {
     Postgres(crate::postgres::PostgresClient),
@@ -46,12 +58,14 @@ impl DatabaseClient {
         dispatch!(self, ping().await)
     }
 
-    /// Whether the connection is already known to be dead, without any I/O.
-    /// Only Postgres holds a single long-lived socket; the other backends pool
-    /// or reconnect internally and are probed with [`Self::ping`] instead.
+    /// Whether the connection is already known to be unusable, without any
+    /// I/O. Postgres and MySQL hold one long-lived connection each; the other
+    /// backends pool or reconnect internally and are probed with
+    /// [`Self::ping`] instead.
     pub fn is_closed(&self) -> bool {
         match self {
             DatabaseClient::Postgres(client) => client.is_closed(),
+            DatabaseClient::MySql(client) => client.is_closed(),
             _ => false,
         }
     }
@@ -61,6 +75,7 @@ impl DatabaseClient {
     pub async fn cancel_running(&self) -> Result<()> {
         match self {
             DatabaseClient::Postgres(client) => client.cancel_running().await,
+            DatabaseClient::MySql(client) => client.cancel_running().await,
             _ => Ok(()),
         }
     }
@@ -91,7 +106,7 @@ impl DatabaseClient {
     pub async fn list_columns(&self, table: &str, schema: Option<&str>) -> Result<Vec<String>> {
         match self {
             DatabaseClient::Postgres(client) => client.list_columns(table).await,
-            DatabaseClient::MySql(client) => client.list_columns(table).await,
+            DatabaseClient::MySql(client) => client.list_columns(table, schema).await,
             DatabaseClient::Cassandra(client) => client.list_columns(table, schema).await,
             DatabaseClient::ClickHouse(client) => client.list_columns(table, schema).await,
             DatabaseClient::Sqlite(client) => client.list_columns(table, schema).await,

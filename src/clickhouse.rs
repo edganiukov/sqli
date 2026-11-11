@@ -1,6 +1,7 @@
-use crate::db::QueryResult;
+use crate::db::{QueryResult, Tls};
 use crate::error::{Result, SqliError};
 use crate::format as fmt;
+use crate::sql;
 use chrono::{DateTime, NaiveDate};
 use chrono_tz::Tz;
 use clickhouse_rs::types::{Block, Complex, Decimal};
@@ -49,7 +50,7 @@ impl ClickHouseClient {
         user: &str,
         password: &str,
         database: &str,
-        tls: bool,
+        tls: Tls,
         use_http: bool,
         readonly: bool,
     ) -> Result<Self> {
@@ -95,15 +96,28 @@ impl ClickHouseClient {
         }
     }
 
-    pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
-        format!("SELECT * FROM {} LIMIT {}", table, limit)
+    /// `` `database`.`table` ``, or just the table when no database is known.
+    fn qualified(table: &str, database: Option<&str>) -> String {
+        match database {
+            Some(db) if !db.is_empty() => format!(
+                "{}.{}",
+                sql::ident_backslash(db, '`'),
+                sql::ident_backslash(table, '`')
+            ),
+            _ => sql::ident_backslash(table, '`'),
+        }
+    }
+
+    pub fn select_table_query(&self, table: &str, limit: usize, database: Option<&str>) -> String {
+        format!(
+            "SELECT * FROM {} LIMIT {}",
+            Self::qualified(table, database),
+            limit
+        )
     }
 
     pub fn describe_table_query(&self, table: &str, database: Option<&str>) -> String {
-        match database {
-            Some(db) => format!("DESCRIBE TABLE {}.{}", db, table),
-            None => format!("DESCRIBE TABLE {}", table),
-        }
+        format!("DESCRIBE TABLE {}", Self::qualified(table, database))
     }
 
     pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
@@ -125,11 +139,13 @@ impl HttpClient {
         user: &str,
         password: &str,
         database: &str,
-        tls: bool,
+        tls: Tls,
         readonly: bool,
     ) -> Result<Self> {
-        let client = Client::new();
-        let scheme = if tls { "https" } else { "http" };
+        let client = Client::builder()
+            .danger_accept_invalid_certs(tls == Tls::Unverified)
+            .build()?;
+        let scheme = if tls == Tls::Off { "http" } else { "https" };
         let base_url = format!("{}://{}:{}", scheme, host, port);
 
         let ch_client = Self {
@@ -198,8 +214,8 @@ impl HttpClient {
 
     pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         let query = format!(
-            "SELECT name FROM system.tables WHERE database = '{}' ORDER BY name FORMAT JSONEachRow",
-            database.replace('\'', "''")
+            "SELECT name FROM system.tables WHERE database = {} ORDER BY name FORMAT JSONEachRow",
+            sql::literal_backslash(database)
         );
         let response = self.execute_raw(&query).await?;
 
@@ -256,13 +272,11 @@ impl HttpClient {
     }
 
     pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
-        let query = match database {
-            Some(db) => format!(
-                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{}'",
-                db, table
-            ),
-            None => format!("SELECT name FROM system.columns WHERE table = '{}'", table),
-        };
+        let query = format!(
+            "SELECT name FROM system.columns WHERE database = {} AND table = {}",
+            sql::literal_backslash(database.unwrap_or(&self.database)),
+            sql::literal_backslash(table)
+        );
         let result = self.execute_query(&query).await?;
         match result {
             QueryResult::Select { rows, .. } => Ok(rows
@@ -295,22 +309,10 @@ impl NativeClient {
         user: &str,
         password: &str,
         database: &str,
-        _tls: bool, // TLS not yet supported in clickhouse-rs
+        tls: Tls,
         readonly: bool,
     ) -> Result<Self> {
-        // Build connection URL for native protocol
-        // Format: tcp://user:password@host:port/database
-        let mut url = if password.is_empty() {
-            format!("tcp://{}@{}:{}/{}", user, host, port, database)
-        } else {
-            format!("tcp://{}:{}@{}:{}/{}", user, password, host, port, database)
-        };
-
-        // `readonly=1` is a clickhouse-rs connection option restricting the
-        // session to read-only queries (only read data queries allowed).
-        if readonly {
-            url.push_str("?readonly=1");
-        }
+        let url = Self::connection_url(host, port, user, password, database, tls, readonly);
 
         let pool = Pool::new(url);
 
@@ -322,6 +324,41 @@ impl NativeClient {
             pool,
             database: database.to_string(),
         })
+    }
+
+    /// Connection URL for the native protocol:
+    /// `tcp://user:password@host:port/database?option=value&...`
+    fn connection_url(
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+        database: &str,
+        tls: Tls,
+        readonly: bool,
+    ) -> String {
+        let mut url = if password.is_empty() {
+            format!("tcp://{}@{}:{}/{}", user, host, port, database)
+        } else {
+            format!("tcp://{}:{}@{}:{}/{}", user, password, host, port, database)
+        };
+
+        let mut options = Vec::new();
+        // `readonly=1` restricts the session to read-only queries.
+        if readonly {
+            options.push("readonly=1");
+        }
+        if tls != Tls::Off {
+            options.push("secure=true");
+        }
+        if tls == Tls::Unverified {
+            options.push("skip_verify=true");
+        }
+        if !options.is_empty() {
+            url.push('?');
+            url.push_str(&options.join("&"));
+        }
+        url
     }
 
     async fn get_client(&self) -> Result<ClientHandle> {
@@ -348,8 +385,8 @@ impl NativeClient {
     pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
         let mut client = self.get_client().await?;
         let query = format!(
-            "SELECT name FROM system.tables WHERE database = '{}' ORDER BY name",
-            database.replace('\'', "''")
+            "SELECT name FROM system.tables WHERE database = {} ORDER BY name",
+            sql::literal_backslash(database)
         );
         let block = client.query(&query).fetch_all().await?;
 
@@ -381,16 +418,11 @@ impl NativeClient {
 
     pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
         let mut client = self.get_client().await?;
-        let query = match database {
-            Some(db) => format!(
-                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{}'",
-                db, table
-            ),
-            None => format!(
-                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{}'",
-                self.database, table
-            ),
-        };
+        let query = format!(
+            "SELECT name FROM system.columns WHERE database = {} AND table = {}",
+            sql::literal_backslash(database.unwrap_or(&self.database)),
+            sql::literal_backslash(table)
+        );
         let block = client.query(&query).fetch_all().await?;
 
         Self::extract_string_column(&block, "name")
@@ -524,5 +556,35 @@ impl NativeClient {
         try_value!(f64);
 
         "<unsupported>".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_url_carries_tls_and_readonly_options() {
+        let url = |tls, readonly| {
+            NativeClient::connection_url("ch", 9440, "default", "pw", "db", tls, readonly)
+        };
+        assert_eq!(url(Tls::Off, false), "tcp://default:pw@ch:9440/db");
+        assert_eq!(
+            url(Tls::Verified, false),
+            "tcp://default:pw@ch:9440/db?secure=true"
+        );
+        assert_eq!(
+            url(Tls::Unverified, true),
+            "tcp://default:pw@ch:9440/db?readonly=1&secure=true&skip_verify=true"
+        );
+    }
+
+    #[test]
+    fn table_references_are_quoted() {
+        assert_eq!(
+            ClickHouseClient::qualified("order", Some("my db")),
+            "`my db`.`order`"
+        );
+        assert_eq!(ClickHouseClient::qualified("a`b", None), "`a\\`b`");
     }
 }

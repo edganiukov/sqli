@@ -3,6 +3,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::completion::{Suggestion, SuggestionKind};
 use crate::controller::Controller;
@@ -285,7 +286,7 @@ pub fn draw_record_detail(
     };
 
     // Calculate the maximum field name width for alignment
-    let max_name_width = columns.iter().map(|c| c.len()).max().unwrap_or(0);
+    let max_name_width = columns.iter().map(|c| c.width()).max().unwrap_or(0);
     let left_padding = 2;
     let value_width = inner
         .width
@@ -299,7 +300,7 @@ pub fn draw_record_detail(
         field_start_lines.push(lines.len());
 
         let is_selected = field_idx == selected_field;
-        let field_name = format!("{:<width$}", col, width = max_name_width);
+        let field_name = pad_to_width(col, max_name_width);
 
         // Style based on selection
         let name_style = if is_selected {

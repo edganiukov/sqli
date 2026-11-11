@@ -24,6 +24,10 @@ pub struct ConnectionConfig {
     pub path: Option<String>,
     #[serde(default)]
     pub tls: bool,
+    /// Verify the server certificate when `tls` is on. On by default; turn it
+    /// off for servers with a self-signed certificate.
+    #[serde(default = "default_true")]
+    pub tls_verify: bool,
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
@@ -31,6 +35,10 @@ pub struct ConnectionConfig {
     /// Protocol for ClickHouse: "native" (default) or "http"
     #[serde(default)]
     pub protocol: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl ConnectionConfig {
@@ -55,6 +63,7 @@ impl ConnectionConfig {
             database: self.database.clone(),
             path: self.path.clone(),
             tls: self.tls,
+            tls_verify: self.tls_verify,
             readonly: self.readonly,
             group: self.group.clone(),
             protocol: self.protocol.clone(),
@@ -62,65 +71,49 @@ impl ConnectionConfig {
     }
 }
 
-pub fn load_config(custom_path: Option<PathBuf>) -> Vec<DatabaseConn> {
+/// Load the connections from the config file.
+///
+/// With no config file at all the built-in default connection is used. A
+/// config file that exists but cannot be read or parsed is an error: silently
+/// falling back to the default would hide the mistake behind a `localhost`
+/// entry the user never wrote.
+pub fn load_config(custom_path: Option<PathBuf>) -> Result<Vec<DatabaseConn>, String> {
     use crate::debug_log;
 
-    let config_path = custom_path.clone().or_else(get_config_path);
+    let Some(path) = custom_path.or_else(get_config_path) else {
+        debug_log!("No config file found, using defaults");
+        return Ok(default_connections());
+    };
+    debug_log!("Config path: {}", path.display());
 
-    if let Some(ref path) = custom_path {
-        debug_log!("Custom config path: {:?}", path);
-    }
-    debug_log!(
-        "Resolved config path: {:?}",
-        config_path.as_ref().map(|p| p.display().to_string())
-    );
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("Cannot read config file {}: {}", path.display(), e))?;
+    let connections = parse_config(&content)
+        .map_err(|e| format!("Invalid config file {}: {}", path.display(), e))?;
+    debug_log!("Loaded {} connection(s)", connections.len());
+    Ok(connections)
+}
 
-    match config_path {
-        Some(path) => match fs::read_to_string(&path) {
-            Ok(content) => match toml::from_str::<IndexMap<String, ConnectionConfig>>(&content) {
-                Ok(configs) => {
-                    debug_log!("Parsed {} connection(s) from config", configs.len());
-                    let connections: Vec<DatabaseConn> = configs
-                        .iter()
-                        .filter_map(|(name, config)| {
-                            let conn = config.to_database_conn(name);
-                            if conn.is_none() {
-                                debug_log!(
-                                    "Skipping connection '{}': unknown type '{}'",
-                                    name,
-                                    config.db_type
-                                );
-                            }
-                            conn
-                        })
-                        .collect();
-                    if connections.is_empty() {
-                        debug_log!("No valid connections found, using defaults");
-                        default_connections()
-                    } else {
-                        debug_log!("Loaded {} connection(s)", connections.len());
-                        connections
-                    }
-                }
-                Err(e) => {
-                    debug_log!("Failed to parse config file: {}", e);
-                    default_connections()
-                }
-            },
-            Err(e) => {
-                debug_log!("Failed to read config file: {}", e);
-                default_connections()
-            }
-        },
-        None => {
-            debug_log!("No config file found, using defaults");
-            if let Some(config_dir) = get_config_dir() {
-                let expected = config_dir.join("config.toml");
-                debug_log!("Expected config at: {:?}", expected);
-            }
-            default_connections()
-        }
+fn parse_config(content: &str) -> Result<Vec<DatabaseConn>, String> {
+    let configs: IndexMap<String, ConnectionConfig> =
+        toml::from_str(content).map_err(|e| e.to_string())?;
+
+    let mut connections = Vec::with_capacity(configs.len());
+    for (name, config) in &configs {
+        let conn = config.to_database_conn(name).ok_or_else(|| {
+            format!(
+                "connection '{}' has unknown type '{}' \
+                 (expected postgres, mysql, cassandra, clickhouse or sqlite)",
+                name, config.db_type
+            )
+        })?;
+        connections.push(conn);
     }
+
+    if connections.is_empty() {
+        return Ok(default_connections());
+    }
+    Ok(connections)
 }
 
 fn get_config_dir() -> Option<PathBuf> {
@@ -158,6 +151,7 @@ fn default_connections() -> Vec<DatabaseConn> {
         database: None,
         path: None,
         tls: false,
+        tls_verify: true,
         readonly: false,
         group: None,
         protocol: None,
@@ -265,11 +259,15 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
             database: None,
             path: Some(path),
             tls: false,
+            tls_verify: true,
             readonly: false,
             group: None,
             protocol: None,
         });
     }
+
+    // Options after `?`, e.g. `pgs://host/db?tls_verify=false`
+    let (rest, tls_verify) = split_url_options(rest)?;
 
     // Parse user:pass@host:port/database
     let (auth_host, database) = if let Some(idx) = rest.rfind('/') {
@@ -353,15 +351,80 @@ pub fn parse_connection_string(url: &str) -> Result<DatabaseConn, String> {
         database,
         path: None,
         tls,
+        tls_verify,
         readonly: false,
         group: None,
         protocol,
     })
 }
 
+/// Split `?key=value&...` options off the end of a connection URL and apply
+/// them. Returns the URL without the options and the `tls_verify` setting.
+fn split_url_options(rest: &str) -> Result<(&str, bool), String> {
+    let Some((rest, options)) = rest.split_once('?') else {
+        return Ok((rest, true));
+    };
+
+    let mut tls_verify = true;
+    for option in options.split('&').filter(|o| !o.is_empty()) {
+        match option.split_once('=') {
+            Some(("tls_verify", "true")) => tls_verify = true,
+            Some(("tls_verify", "false")) => tls_verify = false,
+            Some(("tls_verify", value)) => {
+                return Err(format!(
+                    "Invalid value for tls_verify: '{}' (expected true or false)",
+                    value
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "Unknown connection option: '{}' (supported: tls_verify=false)",
+                    option
+                ));
+            }
+        }
+    }
+    Ok((rest, tls_verify))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_lists_connections_in_file_order() {
+        let connections = parse_config(
+            "[b]\ntype = \"postgres\"\nhost = \"db\"\n\n[a]\ntype = \"sqlite\"\npath = \"a.db\"\n",
+        )
+        .unwrap();
+        let names: Vec<&str> = connections.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["b", "a"]);
+    }
+
+    #[test]
+    fn config_syntax_error_is_reported() {
+        let err = parse_config("[pg]\ntype = \"postgres\nhost = 1").unwrap_err();
+        assert!(err.contains("line 2"), "unexpected message: {err}");
+    }
+
+    #[test]
+    fn config_unknown_type_is_reported_with_the_connection_name() {
+        let err = parse_config("[warehouse]\ntype = \"oracle\"\n").unwrap_err();
+        assert!(err.contains("'warehouse'") && err.contains("'oracle'"));
+    }
+
+    #[test]
+    fn empty_config_falls_back_to_the_default_connection() {
+        let connections = parse_config("").unwrap();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].name, "localhost");
+    }
+
+    #[test]
+    fn missing_explicit_config_file_is_an_error() {
+        let err = load_config(Some(PathBuf::from("/nonexistent/sqli.toml"))).unwrap_err();
+        assert!(err.contains("/nonexistent/sqli.toml"));
+    }
 
     #[test]
     fn test_parse_postgres_full() {
@@ -472,6 +535,46 @@ mod tests {
         let conn = parse_connection_string("css://user@node1/keyspace").unwrap();
         assert!(matches!(conn.db_type, DatabaseType::Cassandra));
         assert!(conn.tls);
+    }
+
+    #[test]
+    fn tls_is_verified_unless_turned_off() {
+        let conn = parse_connection_string("pgs://user@host/db").unwrap();
+        assert_eq!(conn.tls_mode(), crate::db::Tls::Verified);
+
+        let conn = parse_connection_string("pgs://user@host/db?tls_verify=false").unwrap();
+        assert_eq!(conn.tls_mode(), crate::db::Tls::Unverified);
+        assert_eq!(conn.database.as_deref(), Some("db"));
+
+        // Without a database the option still parses, and the host is intact.
+        let conn = parse_connection_string("mys://root@host:3307?tls_verify=false").unwrap();
+        assert_eq!(conn.tls_mode(), crate::db::Tls::Unverified);
+        assert_eq!((conn.host.as_str(), conn.port), ("host", 3307));
+
+        // The option alone does not switch TLS on.
+        let conn = parse_connection_string("pg://user@host/db?tls_verify=false").unwrap();
+        assert_eq!(conn.tls_mode(), crate::db::Tls::Off);
+    }
+
+    #[test]
+    fn unknown_url_options_are_rejected() {
+        let err = parse_connection_string("pgs://host/db?sslmode=require").unwrap_err();
+        assert!(err.contains("sslmode=require"), "unexpected message: {err}");
+        let err = parse_connection_string("pgs://host/db?tls_verify=no").unwrap_err();
+        assert!(err.contains("tls_verify"), "unexpected message: {err}");
+    }
+
+    #[test]
+    fn config_tls_verify_defaults_to_on() {
+        let connections = parse_config(
+            "[a]\ntype = \"postgres\"\ntls = true\n\n\
+             [b]\ntype = \"postgres\"\ntls = true\ntls_verify = false\n\n\
+             [c]\ntype = \"postgres\"\n",
+        )
+        .unwrap();
+        let modes: Vec<_> = connections.iter().map(|c| c.tls_mode()).collect();
+        use crate::db::Tls;
+        assert_eq!(modes, [Tls::Verified, Tls::Unverified, Tls::Off]);
     }
 
     #[test]

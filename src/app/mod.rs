@@ -64,12 +64,6 @@ impl App {
         self.controller.handle_paste(text);
     }
 
-    pub fn handle_resize(&mut self) {
-        let tab = self.controller.current_tab_mut();
-        tab.query_textarea.move_cursor(CursorMove::Top);
-        tab.query_textarea.move_cursor(CursorMove::Head);
-    }
-
     pub fn tick_spinner(&mut self) {
         self.controller.tick_spinner();
     }
@@ -575,6 +569,23 @@ impl App {
         tab.query_textarea.set_cursor_line_style(Style::default());
         tab.query_textarea.set_block(block);
         tab.query_textarea.set_line_number_style(dim());
+
+        // The textarea remembers its scroll position between frames and only
+        // moves it to keep the cursor visible. After the pane changes size
+        // that can leave the top of the text scrolled out of view with room
+        // to spare. Rendering once with the cursor on the first line resets
+        // the scroll; the cursor is then put back, and the real render below
+        // scrolls only as far as needed to show it.
+        let size = (area.width, area.height);
+        if tab.query_pane_size != Some(size) {
+            tab.query_pane_size = Some(size);
+            let (row, col) = tab.query_textarea.cursor();
+            tab.query_textarea.move_cursor(CursorMove::Top);
+            tab.query_textarea.move_cursor(CursorMove::Head);
+            frame.render_widget(&tab.query_textarea, area);
+            tab.query_textarea
+                .move_cursor(CursorMove::Jump(row as u16, col as u16));
+        }
         frame.render_widget(&tab.query_textarea, area);
     }
 
@@ -875,5 +886,75 @@ impl App {
             }
             PopupState::None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use super::*;
+
+    /// The rendered screen as text, one line per row.
+    fn screen(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        buffer
+            .content()
+            .chunks(buffer.area.width as usize)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// An app whose tab is in the database view with `query` in the editor.
+    fn database_view(query: &str) -> App {
+        let mut controller = Controller::with_connections(Vec::new(), None);
+        let tab = controller.current_tab_mut();
+        tab.view_state = ViewState::DatabaseView;
+        tab.focus = Focus::Query;
+        tab.query_textarea.insert_str(query);
+        App::new(controller)
+    }
+
+    #[test]
+    fn resizing_keeps_the_query_cursor_and_shows_the_text_from_the_top() {
+        let query = (1..=30)
+            .map(|n| format!("line {n:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut app = database_view(&query);
+        let cursor = app.controller.current_tab().query_textarea.cursor();
+        assert_eq!(cursor, (29, 7));
+        let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
+
+        // Small pane: scrolled down so the cursor on the last line is visible.
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let text = screen(&terminal);
+        assert!(text.contains("line 30") && !text.contains("line 01"));
+
+        // Now tall enough for the whole query: it shows from the first line...
+        terminal.backend_mut().resize(120, 120);
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let text = screen(&terminal);
+        assert!(text.contains("line 01") && text.contains("line 30"));
+        // ...and the cursor has not moved.
+        assert_eq!(app.controller.current_tab().query_textarea.cursor(), cursor);
+    }
+
+    #[test]
+    fn command_line_is_empty_unless_typing_a_command() {
+        let mut app = database_view("select 1");
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let text = screen(&terminal);
+        assert_eq!(text.lines().last().unwrap().trim(), "");
+
+        app.controller.mode = Mode::Command;
+        app.controller.command_buffer = "db".to_string();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let text = screen(&terminal);
+        assert_eq!(text.lines().last().unwrap().trim(), ":db");
     }
 }

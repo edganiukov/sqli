@@ -72,3 +72,24 @@ user = "readonly"
 password = "secret"
 readonly = true
 group = "Prod"
+
+# TLS: encrypted, server certificate verified against the system trust store
+[prod-postgres-tls]
+type = "postgres"
+host = "prod-db.example.com"
+port = 5432
+user = "readonly"
+password = "secret"
+tls = true
+group = "Prod"
+
+# TLS to a server with a self-signed certificate: encrypted, not verified
+[staging-postgres-tls]
+type = "postgres"
+host = "10.0.0.5"
+port = 5432
+user = "app"
+password = "secret"
+tls = true
+tls_verify = false
+group = "Prod"

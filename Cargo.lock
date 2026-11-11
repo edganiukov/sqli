@@ -471,10 +471,12 @@ dependencies = [
  "lazy_static",
  "log",
  "lz4",
+ "native-tls",
  "percent-encoding",
  "pin-project",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-native-tls",
  "url",
  "uuid",
 ]
@@ -2254,6 +2256,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres-native-tls"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fef4de47bb81477e0c3deaf153a1b10ae176484713ff1640969f4cb96b653ebc"
+dependencies = [
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "postgres-protocol"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3067,7 +3081,9 @@ dependencies = [
  "hex",
  "indexmap",
  "mysql_async",
+ "native-tls",
  "num-bigint",
+ "postgres-native-tls",
  "ratatui",
  "reqwest",
  "rusqlite",
@@ -3080,6 +3096,7 @@ dependencies = [
  "tokio-postgres",
  "toml",
  "tui-textarea",
+ "unicode-width 0.2.0",
  "uuid",
 ]
 

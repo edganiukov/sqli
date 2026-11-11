@@ -1026,6 +1026,7 @@ mod tests {
             database: None,
             path: Some(format!("{name}.db")),
             tls: false,
+            tls_verify: true,
             readonly: false,
             group: None,
             protocol: None,

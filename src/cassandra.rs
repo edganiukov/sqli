@@ -1,6 +1,7 @@
-use crate::db::QueryResult;
-use crate::error::Result;
+use crate::db::{QueryResult, Tls};
+use crate::error::{Result, SqliError};
 use crate::format as fmt;
+use crate::sql;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use scylla::frame::response::result::CqlValue;
@@ -19,7 +20,18 @@ impl CassandraClient {
         user: &str,
         password: &str,
         keyspace: &str,
+        tls: Tls,
     ) -> Result<Self> {
+        // The driver's TLS support needs OpenSSL at build time and is not
+        // compiled in. Refuse rather than quietly connect in plain text.
+        if tls != Tls::Off {
+            return Err(SqliError::Connection(
+                "TLS is not supported for Cassandra/ScyllaDB connections in this build; \
+                 set tls = false to connect without encryption"
+                    .to_string(),
+            ));
+        }
+
         let addr = format!("{}:{}", host, port);
 
         let mut builder = SessionBuilder::new().known_node(&addr);
@@ -33,7 +45,7 @@ impl CassandraClient {
         // Use keyspace if provided
         if !keyspace.is_empty() {
             session
-                .query_unpaged(format!("USE {}", keyspace), &[])
+                .query_unpaged(format!("USE {}", sql::ident(keyspace, '"')), &[])
                 .await?;
         }
 
@@ -137,8 +149,15 @@ impl CassandraClient {
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, keyspace: Option<&str>) -> String {
+        // Quoted names are matched exactly; unquoted ones would be lowercased.
+        let table = sql::ident(table, '"');
         match keyspace {
-            Some(ks) => format!("SELECT * FROM {}.{} LIMIT {}", ks, table, limit),
+            Some(ks) => format!(
+                "SELECT * FROM {}.{} LIMIT {}",
+                sql::ident(ks, '"'),
+                table,
+                limit
+            ),
             None => format!("SELECT * FROM {} LIMIT {}", table, limit),
         }
     }
@@ -148,14 +167,15 @@ impl CassandraClient {
             Some(ks) => format!(
                 "SELECT column_name, type, kind \n\
                  FROM system_schema.columns \n\
-                 WHERE keyspace_name = '{}' AND table_name = '{}'",
-                ks, table
+                 WHERE keyspace_name = {} AND table_name = {}",
+                sql::literal(ks),
+                sql::literal(table)
             ),
             None => format!(
                 "SELECT column_name, type, kind \n\
                  FROM system_schema.columns \n\
-                 WHERE table_name = '{}'",
-                table
+                 WHERE table_name = {}",
+                sql::literal(table)
             ),
         }
     }
@@ -164,12 +184,13 @@ impl CassandraClient {
         let query = match keyspace {
             Some(ks) => format!(
                 "SELECT column_name FROM system_schema.columns \
-                 WHERE keyspace_name = '{}' AND table_name = '{}'",
-                ks, table
+                 WHERE keyspace_name = {} AND table_name = {}",
+                sql::literal(ks),
+                sql::literal(table)
             ),
             None => format!(
-                "SELECT column_name FROM system_schema.columns WHERE table_name = '{}'",
-                table
+                "SELECT column_name FROM system_schema.columns WHERE table_name = {}",
+                sql::literal(table)
             ),
         };
         let result = self.session.query_unpaged(query, &[]).await?;
@@ -307,5 +328,24 @@ impl CassandraClient {
     fn format_decimal(d: &CqlDecimal) -> String {
         let (bytes, scale) = d.as_signed_be_bytes_slice_and_exponent();
         fmt::decimal_from_bytes(bytes, scale)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// TLS used to be ignored here, giving a plain-text connection to anyone
+    /// who had asked for an encrypted one.
+    #[tokio::test]
+    async fn tls_is_refused_rather_than_ignored() {
+        for tls in [Tls::Verified, Tls::Unverified] {
+            let result = CassandraClient::connect("127.0.0.1", 9, "", "", "", tls).await;
+            let Err(err) = result else {
+                panic!("expected TLS to be refused");
+            };
+            assert!(err.is_connection());
+            assert!(err.message().contains("TLS is not supported"));
+        }
     }
 }

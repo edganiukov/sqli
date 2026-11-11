@@ -1,11 +1,57 @@
-use crate::db::QueryResult;
+use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use mysql_async::prelude::*;
+use mysql_async::{Conn, Opts, OptsBuilder, SslOpts, Value};
+use tokio::sync::{Mutex, MutexGuard};
+
+use crate::db::{QueryResult, Tls};
 use crate::error::Result;
 use crate::format as fmt;
-use mysql_async::prelude::*;
-use mysql_async::{Opts, OptsBuilder, Pool, Value};
+use crate::sql;
 
 pub struct MySqlClient {
-    pool: Pool,
+    /// One dedicated connection, not a pool. A pooled connection is reset each
+    /// time it is handed out, which silently ends an open transaction and
+    /// forgets `USE`, session variables and temporary tables between
+    /// statements: `BEGIN; UPDATE ...; ROLLBACK` used to leave the update
+    /// committed.
+    conn: Mutex<Conn>,
+    /// Set while a statement is in flight. Still set once the connection is
+    /// free again means the statement never ran to completion (its task was
+    /// cancelled), so the connection may be mid-protocol and must not be
+    /// reused.
+    in_flight: AtomicBool,
+    /// Kept to open the short-lived side connection that cancels a statement.
+    opts: Opts,
+    connection_id: u32,
+}
+
+/// Exclusive use of the connection for one operation. Call [`InUse::finished`]
+/// when the operation has run to completion, successfully or not.
+struct InUse<'a> {
+    conn: MutexGuard<'a, Conn>,
+    in_flight: &'a AtomicBool,
+}
+
+impl InUse<'_> {
+    fn finished(self) {
+        self.in_flight.store(false, Ordering::Release);
+    }
+}
+
+impl Deref for InUse<'_> {
+    type Target = Conn;
+
+    fn deref(&self) -> &Conn {
+        &self.conn
+    }
+}
+
+impl DerefMut for InUse<'_> {
+    fn deref_mut(&mut self) -> &mut Conn {
+        &mut self.conn
+    }
 }
 
 impl MySqlClient {
@@ -16,6 +62,7 @@ impl MySqlClient {
         password: &str,
         database: &str,
         readonly: bool,
+        tls: Tls,
     ) -> Result<Self> {
         let mut opts = OptsBuilder::default()
             .ip_or_hostname(host)
@@ -28,24 +75,64 @@ impl MySqlClient {
                 Some(database)
             });
 
-        // Run on every pooled connection so the read-only mode is enforced
-        // server-side regardless of which connection serves a query.
+        opts = match tls {
+            Tls::Off => opts,
+            Tls::Verified => opts.ssl_opts(SslOpts::default()),
+            Tls::Unverified => opts.ssl_opts(
+                SslOpts::default()
+                    .with_danger_accept_invalid_certs(true)
+                    .with_danger_skip_domain_validation(true),
+            ),
+        };
+
+        // Runs on every new connection, so read-only mode is enforced
+        // server-side again after a reconnect.
         if readonly {
             opts = opts.init(vec!["SET SESSION TRANSACTION READ ONLY"]);
         }
 
-        let pool = Pool::new(Opts::from(opts));
+        let opts = Opts::from(opts);
+        let conn = Conn::new(opts.clone()).await?;
+        let connection_id = conn.id();
 
-        // Test connection
-        let mut conn = pool.get_conn().await?;
-        conn.query_drop("SELECT 1").await?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            in_flight: AtomicBool::new(false),
+            opts,
+            connection_id,
+        })
+    }
 
-        Ok(Self { pool })
+    async fn conn(&self) -> InUse<'_> {
+        let conn = self.conn.lock().await;
+        self.in_flight.store(true, Ordering::Release);
+        InUse {
+            conn,
+            in_flight: &self.in_flight,
+        }
+    }
+
+    /// True when a statement was abandoned midway, leaving the connection in
+    /// an unknown protocol state. (While a statement is merely running, the
+    /// connection is locked and this is false.)
+    pub fn is_closed(&self) -> bool {
+        self.in_flight.load(Ordering::Acquire) && self.conn.try_lock().is_ok()
     }
 
     pub async fn ping(&self) -> Result<()> {
-        let mut conn = self.pool.get_conn().await?;
-        conn.ping().await?;
+        let mut conn = self.conn().await;
+        let result = conn.ping().await;
+        conn.finished();
+        Ok(result?)
+    }
+
+    /// Stop the statement running on this connection. MySQL has no in-band
+    /// cancel, so this asks from a second connection.
+    pub async fn cancel_running(&self) -> Result<()> {
+        let mut side = Conn::new(self.opts.clone()).await?;
+        side.query_drop(format!("KILL QUERY {}", self.connection_id))
+            .await?;
+        side.disconnect().await?;
         Ok(())
     }
 
@@ -53,82 +140,100 @@ impl MySqlClient {
         const SYSTEM_DATABASES: &[&str] =
             &["information_schema", "mysql", "performance_schema", "sys"];
 
-        let mut conn = self.pool.get_conn().await?;
-        let databases: Vec<String> = conn.query("SHOW DATABASES").await?;
+        let mut conn = self.conn().await;
+        let databases = conn.query::<String, _>("SHOW DATABASES").await;
+        conn.finished();
 
-        let filtered: Vec<String> = databases
+        Ok(databases?
             .into_iter()
             .filter(|db| include_system || !SYSTEM_DATABASES.contains(&db.as_str()))
-            .collect();
-
-        Ok(filtered)
+            .collect())
     }
 
     pub async fn list_tables(&self, database: &str) -> Result<Vec<String>> {
-        let mut conn = self.pool.get_conn().await?;
         let query = format!(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = '{}' ORDER BY table_name",
-            database.replace('\'', "''")
+            "SELECT table_name FROM information_schema.tables \
+             WHERE table_schema = {} ORDER BY table_name",
+            sql::literal_backslash(database)
         );
-        let tables: Vec<String> = conn.query(query).await?;
-        Ok(tables)
+        let mut conn = self.conn().await;
+        let tables = conn.query::<String, _>(query).await;
+        conn.finished();
+        Ok(tables?)
     }
 
     pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
-        let mut conn = self.pool.get_conn().await?;
-        let query_upper = query.trim().to_uppercase();
+        let mut conn = self.conn().await;
+        let result = Self::run_statement(&mut conn, query).await;
+        conn.finished();
+        result
+    }
 
-        if query_upper.starts_with("SELECT")
-            || query_upper.starts_with("SHOW")
-            || query_upper.starts_with("DESCRIBE")
-            || query_upper.starts_with("EXPLAIN")
-            || query_upper.starts_with("WITH")
-        {
-            let mut result = conn.query_iter(query).await?;
+    async fn run_statement(conn: &mut Conn, query: &str) -> Result<QueryResult> {
+        // Text protocol, which accepts every statement (prepared statements
+        // reject USE, LOCK TABLES and others). Whether rows come back is read
+        // from the response instead of guessed from the first keyword.
+        let mut result = conn.query_iter(query).await?;
 
-            let columns: Vec<String> = result
-                .columns_ref()
-                .iter()
-                .map(|c| c.name_str().to_string())
-                .collect();
+        let columns: Vec<String> = result
+            .columns_ref()
+            .iter()
+            .map(|c| c.name_str().to_string())
+            .collect();
 
-            let rows: Vec<mysql_async::Row> = result.collect().await?;
+        if columns.is_empty() {
+            let rows_affected = result.affected_rows();
+            result.drop_result().await?;
+            return Ok(QueryResult::Execute { rows_affected });
+        }
 
-            let data_rows: Vec<Vec<String>> = rows
-                .iter()
-                .map(|row| {
-                    (0..columns.len())
-                        .map(|i| Self::format_value(row.get::<Value, _>(i)))
-                        .collect()
-                })
-                .collect();
+        let rows: Vec<mysql_async::Row> = result.collect().await?;
+        // A statement can produce more result sets (CALL); only the first is shown.
+        result.drop_result().await?;
 
-            Ok(QueryResult::Select {
-                columns,
-                rows: data_rows,
+        let data_rows: Vec<Vec<String>> = rows
+            .iter()
+            .map(|row| {
+                (0..columns.len())
+                    .map(|i| Self::format_value(row.get::<Value, _>(i)))
+                    .collect()
             })
-        } else {
-            // Text protocol: the prepared-statement protocol rejects statements
-            // such as USE or LOCK TABLES.
-            conn.query_drop(query).await?;
-            Ok(QueryResult::Execute {
-                rows_affected: conn.affected_rows(),
-            })
+            .collect();
+
+        Ok(QueryResult::Select {
+            columns,
+            rows: data_rows,
+        })
+    }
+
+    /// `` `database`.`table` ``, or just the table when no database is known.
+    fn qualified(table: &str, database: Option<&str>) -> String {
+        match database {
+            Some(db) if !db.is_empty() => {
+                format!("{}.{}", sql::ident(db, '`'), sql::ident(table, '`'))
+            }
+            _ => sql::ident(table, '`'),
         }
     }
 
-    pub fn select_table_query(&self, table: &str, limit: usize, _database: Option<&str>) -> String {
-        format!("SELECT * FROM {} LIMIT {}", table, limit)
+    pub fn select_table_query(&self, table: &str, limit: usize, database: Option<&str>) -> String {
+        format!(
+            "SELECT * FROM {} LIMIT {}",
+            Self::qualified(table, database),
+            limit
+        )
     }
 
-    pub fn describe_table_query(&self, table: &str, _database: Option<&str>) -> String {
-        format!("DESCRIBE {}", table)
+    pub fn describe_table_query(&self, table: &str, database: Option<&str>) -> String {
+        format!("DESCRIBE {}", Self::qualified(table, database))
     }
 
-    pub async fn list_columns(&self, table: &str) -> Result<Vec<String>> {
-        let query = format!("SHOW COLUMNS FROM {}", table);
-        let rows: Vec<mysql_async::Row> = self.pool.get_conn().await?.query(query).await?;
-        Ok(rows.iter().filter_map(|r| r.get::<String, _>(0)).collect())
+    pub async fn list_columns(&self, table: &str, database: Option<&str>) -> Result<Vec<String>> {
+        let query = format!("SHOW COLUMNS FROM {}", Self::qualified(table, database));
+        let mut conn = self.conn().await;
+        let rows = conn.query::<mysql_async::Row, _>(query).await;
+        conn.finished();
+        Ok(rows?.iter().filter_map(|r| r.get::<String, _>(0)).collect())
     }
 
     fn format_value(value: Option<Value>) -> String {

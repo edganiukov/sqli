@@ -272,7 +272,7 @@ impl<C: Connector> Session<C> {
 
         if connected {
             if link.is_closed() {
-                self.mark_lost(generation, "connection closed by the server".to_string());
+                self.mark_lost(generation, "connection closed".to_string());
             } else if idle < STALE_AFTER || self.is_busy() {
                 return Ok((link, generation));
             } else {
@@ -404,7 +404,7 @@ impl<C: Connector> Session<C> {
 
         if connected {
             if link.is_closed() {
-                self.mark_lost(generation, "connection closed by the server".to_string());
+                self.mark_lost(generation, "connection closed".to_string());
             } else {
                 let due =
                     self.verify.swap(false, Ordering::Relaxed) || Instant::now() >= *next_ping;

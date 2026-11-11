@@ -20,7 +20,7 @@ dirs = "5"
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
-clickhouse-rs = "1.1.0-alpha.1"
+clickhouse-rs = { version = "1.1.0-alpha.1", features = ["tls"] }
 chrono-tz = "0.8"
 mysql_async = "0.34"
 num-bigint = "0.4"
@@ -28,6 +28,9 @@ thiserror = "1"
 hex = "0.4"
 arboard = "3.6.1"
 rusqlite = { version = "0.38.0", features = ["bundled"] }
+unicode-width = "0.2"
+native-tls = "0.2"
+postgres-native-tls = "0.5"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

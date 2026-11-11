@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use tui_textarea::CursorMove;
 
 use super::{Controller, PopupState};
 use crate::completion::{self, CompletionContext, Suggestion};
@@ -15,15 +14,8 @@ impl Controller {
 
         // Get cursor position in the full text
         let (row, col) = self.current_tab().query_textarea.cursor();
-        let cursor_pos: usize = self
-            .current_tab()
-            .query_textarea
-            .lines()
-            .iter()
-            .take(row)
-            .map(|l| l.len() + 1) // +1 for newline
-            .sum::<usize>()
-            + col;
+        let cursor_pos =
+            completion::cursor_offset(self.current_tab().query_textarea.lines(), row, col);
 
         // Get current word and context
         let (current_word, word_start) = completion::get_current_word(&query, cursor_pos);
@@ -193,59 +185,79 @@ impl Controller {
         }
     }
 
+    /// Replace the word being typed (from byte offset `word_start` of the
+    /// query up to the cursor) with the chosen suggestion.
     fn apply_completion(&mut self, suggestion: &Suggestion, word_start: usize) {
-        // Get current cursor position
-        let tab = self.current_tab();
-        let (row, col) = tab.query_textarea.cursor();
-        let lines: Vec<&str> = tab
-            .query_textarea
-            .lines()
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-
-        // Calculate position in current line where word starts
-        let mut pos = 0usize;
-        for (i, line) in lines.iter().enumerate() {
-            if i < row {
-                pos += line.len() + 1; // +1 for newline
-            } else {
-                break;
-            }
-        }
-
-        // word_start is global position, convert to position in current line
-        let line_start = pos;
-        let word_start_in_line = if word_start >= line_start {
-            word_start - line_start
-        } else {
-            // Word spans multiple lines? Shouldn't happen, but handle it
-            0
-        };
-
-        // Select from word start to current position and replace
-        // Move cursor to word start
-        let chars_to_move_back = col.saturating_sub(word_start_in_line);
         let tab = self.current_tab_mut();
-        for _ in 0..chars_to_move_back {
-            tab.query_textarea.move_cursor(CursorMove::Back);
-        }
+        let (row, col) = tab.query_textarea.cursor();
+        let lines = tab.query_textarea.lines();
 
-        // Select to end of word (current position)
-        for _ in 0..chars_to_move_back {
-            tab.query_textarea.move_cursor(CursorMove::Forward);
-        }
+        // The word never spans lines, so work within the cursor's line. The
+        // editor deletes by character, so count characters, not bytes.
+        let line = lines.get(row).map(String::as_str).unwrap_or("");
+        let line_start = completion::cursor_offset(lines, row, 0);
+        let cursor_in_line = completion::cursor_offset(lines, row, col) - line_start;
+        let word_in_line = word_start.saturating_sub(line_start).min(cursor_in_line);
+        let typed_chars = line
+            .get(word_in_line..cursor_in_line)
+            .map_or(0, |typed| typed.chars().count());
 
-        // Delete the current word and insert completion
-        // First, delete characters from word_start to cursor
-        for _ in 0..chars_to_move_back {
-            tab.query_textarea.move_cursor(CursorMove::Back);
+        for _ in 0..typed_chars {
+            tab.query_textarea.delete_char();
         }
-        for _ in 0..chars_to_move_back {
-            tab.query_textarea.delete_next_char();
-        }
-
-        // Insert the completion text
         tab.query_textarea.insert_str(&suggestion.text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyModifiers;
+
+    use super::*;
+    use crate::controller::{Focus, ViewState};
+
+    fn editing(query: &str, tables: &[&str]) -> Controller {
+        let mut controller = Controller::with_connections(Vec::new(), None);
+        let tab = controller.current_tab_mut();
+        tab.view_state = ViewState::DatabaseView;
+        tab.focus = Focus::Query;
+        tab.sidebar.tables = tables.iter().map(|t| t.to_string()).collect();
+        tab.query_textarea.insert_str(query);
+        controller
+    }
+
+    fn query(controller: &Controller) -> String {
+        controller.current_tab().query_textarea.lines().join("\n")
+    }
+
+    #[test]
+    fn completes_the_word_after_multibyte_text() {
+        let mut controller = editing("sélect 'ü' from us", &["users", "orders"]);
+
+        controller.open_completion();
+        let PopupState::Completion { suggestions, .. } = &controller.popup_state else {
+            panic!("expected the completion popup");
+        };
+        assert_eq!(suggestions[0].text, "users");
+
+        controller.handle_normal_mode(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(query(&controller), "sélect 'ü' from users");
+    }
+
+    #[test]
+    fn completes_on_a_later_line() {
+        let mut controller = editing("select *\nfrom tablé t\njoin use", &["users"]);
+
+        controller.open_completion();
+        controller.handle_normal_mode(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(query(&controller), "select *\nfrom tablé t\njoin users");
+    }
+
+    /// Used to panic: the cursor column (characters) was used as a byte offset.
+    #[test]
+    fn completion_right_after_a_multibyte_character_does_not_panic() {
+        let mut controller = editing("é", &["users"]);
+        controller.open_completion();
     }
 }

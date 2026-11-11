@@ -1,19 +1,57 @@
-use crate::db::QueryResult;
-use crate::error::Result;
-use crate::format as fmt;
-
+use std::future::Future;
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use postgres_native_tls::MakeTlsConnector;
 use serde_json::Value as JsonValue;
+use tokio_postgres::config::SslMode;
 use tokio_postgres::types::{FromSql, Kind, Type};
 use tokio_postgres::{Client, Config, NoTls, Row};
 use uuid::Uuid;
 
+use crate::db::{QueryResult, Tls};
+use crate::error::{Result, SqliError};
+use crate::format as fmt;
+use crate::sql;
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Schema assumed for a table name that carries no schema of its own.
+const DEFAULT_SCHEMA: &str = "public";
 
 pub struct PostgresClient {
     client: Client,
+    /// The TLS setup of this connection, needed again to cancel a query
+    /// (a cancel request travels over a connection of its own).
+    tls: Option<MakeTlsConnector>,
+}
+
+/// Run a connection's I/O in the background until it ends.
+fn drive<F>(connection: F)
+where
+    F: Future<Output = std::result::Result<(), tokio_postgres::Error>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            crate::debug_log!("Postgres connection error: {}", e);
+        }
+    });
+}
+
+/// Name a table is listed under: bare for the default schema, `schema.table`
+/// otherwise. A default-schema table with a dot in its own name is qualified
+/// too, so the first dot always separates schema from table.
+fn display_name(schema: &str, table: &str) -> String {
+    if schema == DEFAULT_SCHEMA && !table.contains('.') {
+        table.to_string()
+    } else {
+        format!("{}.{}", schema, table)
+    }
+}
+
+/// Inverse of [`display_name`]: `(schema, table)`.
+fn split_name(name: &str) -> (&str, &str) {
+    name.split_once('.').unwrap_or((DEFAULT_SCHEMA, name))
 }
 
 impl PostgresClient {
@@ -24,6 +62,7 @@ impl PostgresClient {
         password: &str,
         database: &str,
         readonly: bool,
+        tls: Tls,
     ) -> Result<Self> {
         crate::debug_log!(
             "Postgres connecting to {}:{} database='{}' user='{}'",
@@ -53,13 +92,33 @@ impl PostgresClient {
             config.dbname(database);
         }
 
-        let (client, connection) = config.connect(NoTls).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                crate::debug_log!("Postgres connection error: {}", e);
+        let tls = match tls {
+            Tls::Off => None,
+            mode => {
+                let unverified = mode == Tls::Unverified;
+                let connector = native_tls::TlsConnector::builder()
+                    .danger_accept_invalid_certs(unverified)
+                    .danger_accept_invalid_hostnames(unverified)
+                    .build()
+                    .map_err(|e| SqliError::Connection(format!("TLS setup failed: {}", e)))?;
+                // Never fall back to plain text when TLS was asked for.
+                config.ssl_mode(SslMode::Require);
+                Some(MakeTlsConnector::new(connector))
             }
-        });
+        };
+
+        let client = match &tls {
+            Some(tls) => {
+                let (client, connection) = config.connect(tls.clone()).await?;
+                drive(connection);
+                client
+            }
+            None => {
+                let (client, connection) = config.connect(NoTls).await?;
+                drive(connection);
+                client
+            }
+        };
 
         // Enforce read-only at the session level so writes are rejected by the
         // server, not just by the client-side statement heuristic.
@@ -69,7 +128,7 @@ impl PostgresClient {
                 .await?;
         }
 
-        Ok(Self { client })
+        Ok(Self { client, tls })
     }
 
     /// Round-trip a protocol-level `Sync`; fails if the connection is gone.
@@ -86,7 +145,11 @@ impl PostgresClient {
     /// Ask the server to abort the statement currently running on this
     /// connection. Dropping the client-side future alone leaves it running.
     pub async fn cancel_running(&self) -> Result<()> {
-        self.client.cancel_token().cancel_query(NoTls).await?;
+        let token = self.client.cancel_token();
+        match &self.tls {
+            Some(tls) => token.cancel_query(tls.clone()).await?,
+            None => token.cancel_query(NoTls).await?,
+        }
         Ok(())
     }
 
@@ -107,81 +170,97 @@ impl PostgresClient {
         Ok(databases)
     }
 
-    pub async fn list_tables(&self, schema: &str) -> Result<Vec<String>> {
-        crate::debug_log!("Postgres listing tables for schema '{}'", schema);
+    /// Tables of every user schema, the default schema first. Names outside
+    /// the default schema are listed as `schema.table`.
+    pub async fn list_tables(&self, _schema: &str) -> Result<Vec<String>> {
         let rows = self
             .client
             .query(
-                "SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename",
-                &[&schema],
+                "SELECT schemaname, tablename FROM pg_tables \
+                 WHERE schemaname NOT IN ('pg_catalog', 'information_schema') \
+                   AND schemaname NOT LIKE 'pg\\_toast%' \
+                   AND schemaname NOT LIKE 'pg\\_temp%' \
+                 ORDER BY schemaname <> $1, schemaname, tablename",
+                &[&DEFAULT_SCHEMA],
             )
             .await?;
 
-        let tables: Vec<String> = rows.iter().map(|row| row.get(0)).collect();
+        let tables: Vec<String> = rows
+            .iter()
+            .map(|row| display_name(row.get(0), row.get(1)))
+            .collect();
         crate::debug_log!("Found {} tables: {:?}", tables.len(), tables);
         Ok(tables)
     }
 
     pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
         crate::debug_log!("Postgres executing: {}", query.trim().replace('\n', " "));
-        let query_upper = query.trim().to_uppercase();
 
-        if query_upper.starts_with("SELECT") || query_upper.starts_with("WITH") {
-            let rows = self.client.query(query, &[]).await?;
-
-            if rows.is_empty() {
-                return Ok(QueryResult::Select {
-                    columns: vec![],
-                    rows: vec![],
-                });
-            }
-
-            let columns: Vec<String> = rows[0]
-                .columns()
-                .iter()
-                .map(|c| c.name().to_string())
-                .collect();
-
-            let data_rows: Vec<Vec<String>> = rows
-                .iter()
-                .map(|row| {
-                    (0..row.len())
-                        .map(|i| Self::get_column_value(row, i))
-                        .collect()
-                })
-                .collect();
-
-            Ok(QueryResult::Select {
-                columns,
-                rows: data_rows,
-            })
-        } else {
-            let rows_affected = self.client.execute(query, &[]).await?;
-            Ok(QueryResult::Execute { rows_affected })
+        // Preparing the statement tells us what it returns. Guessing from the
+        // first keyword misses SHOW, EXPLAIN, VALUES and INSERT ... RETURNING,
+        // and reading column names off the first row loses the header of an
+        // empty result.
+        let statement = self.client.prepare(query).await?;
+        if statement.columns().is_empty() {
+            let rows_affected = self.client.execute(&statement, &[]).await?;
+            return Ok(QueryResult::Execute { rows_affected });
         }
+
+        let columns: Vec<String> = statement
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
+
+        let rows = self.client.query(&statement, &[]).await?;
+        let data_rows: Vec<Vec<String>> = rows
+            .iter()
+            .map(|row| {
+                (0..row.len())
+                    .map(|i| Self::get_column_value(row, i))
+                    .collect()
+            })
+            .collect();
+
+        Ok(QueryResult::Select {
+            columns,
+            rows: data_rows,
+        })
     }
 
     pub fn select_table_query(&self, table: &str, limit: usize, _schema: Option<&str>) -> String {
-        format!("SELECT * FROM \"{}\" LIMIT {}", table, limit)
+        let (schema, table) = split_name(table);
+        format!(
+            "SELECT * FROM {}.{} LIMIT {}",
+            sql::ident(schema, '"'),
+            sql::ident(table, '"'),
+            limit
+        )
     }
 
     pub fn describe_table_query(&self, table: &str, _schema: Option<&str>) -> String {
+        let (schema, table) = split_name(table);
         format!(
             "SELECT column_name, data_type, is_nullable, column_default \n\
              FROM information_schema.columns \n\
-             WHERE table_name = '{}' \n\
+             WHERE table_schema = {} AND table_name = {} \n\
              ORDER BY ordinal_position",
-            table
+            sql::literal(schema),
+            sql::literal(table)
         )
     }
 
     pub async fn list_columns(&self, table: &str) -> Result<Vec<String>> {
-        let query = format!(
-            "SELECT column_name FROM information_schema.columns \
-             WHERE table_name = '{}' ORDER BY ordinal_position",
-            table
-        );
-        let rows = self.client.query(&query, &[]).await?;
+        let (schema, table) = split_name(table);
+        let rows = self
+            .client
+            .query(
+                "SELECT column_name::text FROM information_schema.columns \
+                 WHERE table_schema = $1::text AND table_name = $2::text \
+                 ORDER BY ordinal_position",
+                &[&schema, &table],
+            )
+            .await?;
         Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
     }
 
@@ -312,5 +391,24 @@ impl<'a> FromSql<'a> for RawText {
 
     fn accepts(_ty: &Type) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_names_round_trip_through_their_display_form() {
+        for (schema, table) in [
+            ("public", "users"),
+            ("analytics", "events"),
+            ("public", "odd.name"),
+            ("analytics", "odd.name"),
+        ] {
+            assert_eq!(split_name(&display_name(schema, table)), (schema, table));
+        }
+        assert_eq!(display_name("public", "users"), "users");
+        assert_eq!(display_name("analytics", "events"), "analytics.events");
     }
 }
